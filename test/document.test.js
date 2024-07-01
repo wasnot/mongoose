@@ -38,7 +38,7 @@ function TestDocument() {
  * Inherits from Document.
  */
 
-TestDocument.prototype.__proto__ = Document.prototype;
+Object.setPrototypeOf(TestDocument.prototype, Document.prototype);
 
 for (const i in EventEmitter.prototype) {
   TestDocument[i] = EventEmitter.prototype[i];
@@ -216,7 +216,7 @@ describe('document', function() {
 
   describe('shortcut getters', function() {
     it('return undefined for properties with a null/undefined parent object (gh-1326)', function() {
-      const doc = new TestDocument;
+      const doc = new TestDocument();
       doc.init({ nested: null });
       assert.strictEqual(undefined, doc.nested.age);
     });
@@ -347,7 +347,7 @@ describe('document', function() {
         path: 'my path'
       },
       nested2: {},
-      date: new Date
+      date: new Date()
     });
 
     let clone = doc.toObject({ getters: true, virtuals: false });
@@ -423,7 +423,7 @@ describe('document', function() {
     doc.schema.options.toObject = {};
     doc.schema.options.toObject.transform = function xform(doc, ret) {
       // ignore embedded docs
-      if (typeof doc.ownerDocument === 'function') {
+      if (doc.$isSubdocument) {
         return;
       }
 
@@ -432,7 +432,6 @@ describe('document', function() {
       delete ret.oids;
       ret._id = ret._id.toString();
     };
-
     clone = doc.toObject();
     assert.equal(doc.id, clone._id);
     assert.ok(undefined === clone.em);
@@ -445,7 +444,7 @@ describe('document', function() {
     const out = { myid: doc._id.toString() };
     doc.schema.options.toObject.transform = function(doc, ret) {
       // ignore embedded docs
-      if (typeof doc.ownerDocument === 'function') {
+      if (doc.$isSubdocument) {
         return;
       }
 
@@ -782,6 +781,17 @@ describe('document', function() {
       assert.strictEqual(obj.props, void 0);
       assert.strictEqual(obj.owner.props, void 0);
     });
+
+    it('minimizes single nested subdocs (gh-11247)', async function() {
+      const nestedSchema = Schema({ bar: String }, { _id: false });
+      const schema = Schema({ foo: nestedSchema });
+
+      const MyModel = db.model('Test', schema);
+
+      const myModel = await MyModel.create({ foo: {} });
+
+      assert.strictEqual(myModel.toObject().foo, void 0);
+    });
   });
 
   describe('toJSON', function() {
@@ -845,7 +855,7 @@ describe('document', function() {
       doc.schema.options.toJSON = {};
       doc.schema.options.toJSON.transform = function xform(doc, ret) {
         // ignore embedded docs
-        if (typeof doc.ownerDocument === 'function') {
+        if (doc.$isSubdocument) {
           return;
         }
 
@@ -867,7 +877,7 @@ describe('document', function() {
       const out = { myid: doc._id.toString() };
       doc.schema.options.toJSON.transform = function(doc, ret) {
         // ignore embedded docs
-        if (typeof doc.ownerDocument === 'function') {
+        if (doc.$isSubdocument) {
           return;
         }
 
@@ -949,6 +959,25 @@ describe('document', function() {
 
       assert.ok(foundGroup.toJSON()._users[0].hello);
     });
+
+    it('jsonifying with undefined path (gh-11922)', async function() {
+      const userSchema = new Schema({
+        name: String,
+        friends: [{
+          type: String,
+          transform(friendName) {
+            return `Hi, ${friendName}`;
+          }
+        }]
+      });
+      const User = db.model('User', userSchema);
+      const alice = await User.create({ name: 'Alic', friends: ['Bob', 'Jack'] });
+      const foundAlice = await User.findById(alice._id, { name: true });
+      assert.equal(foundAlice.friends, undefined);
+      const foundAlicJson = foundAlice.toJSON();
+      assert.equal(foundAlicJson.friends, undefined);
+      assert.equal(foundAlicJson.name, 'Alic');
+    });
   });
 
   describe('inspect', function() {
@@ -1025,6 +1054,25 @@ describe('document', function() {
       assert.ok(posts[0].postedBy._id);
     });
 
+    it('handles infinite recursion (gh-11756)', function() {
+      const User = db.model('User', Schema({
+        name: { type: String, required: true },
+        posts: [{ type: mongoose.Types.ObjectId, ref: 'Post' }]
+      }));
+
+      const Post = db.model('Post', Schema({
+        creator: { type: Schema.Types.ObjectId, ref: 'User' }
+      }));
+
+      const user = new User({ name: 'Test', posts: [] });
+      const post = new Post({ creator: user });
+      user.posts.push(post);
+
+      const inspected = post.inspect();
+      assert.ok(inspected);
+      assert.equal(inspected.creator.posts[0].creator.name, 'Test');
+    });
+
     it('populate on nested path (gh-5703)', function() {
       const toySchema = new mongoose.Schema({ color: String });
       const Toy = db.model('Cat', toySchema);
@@ -1057,9 +1105,9 @@ describe('document', function() {
 
   describe.skip('#update', function() {
     it('returns a Query', function() {
-      const mg = new mongoose.Mongoose;
+      const mg = new mongoose.Mongoose();
       const M = mg.model('Test', { s: String });
-      const doc = new M;
+      const doc = new M();
       assert.ok(doc.update() instanceof Query);
     });
     it('calling update on document should relay to its model (gh-794)', async function() {
@@ -1103,7 +1151,7 @@ describe('document', function() {
     });
     it('ValidationErrors should be instances of Error', function() {
       const ValidationError = Document.ValidationError;
-      const err = new ValidationError(new TestDocument);
+      const err = new ValidationError(new TestDocument());
       assert.ok(err instanceof Error);
     });
   });
@@ -1129,7 +1177,7 @@ describe('document', function() {
     assert.equal(E.ten(), 10);
 
     // test push casting
-    p = new P;
+    p = new P();
     p.embed.push({ name: 'apple' });
     assert.equal(typeof p.embed[0].test, 'function');
     assert.equal(typeof E.ten, 'function');
@@ -1137,7 +1185,7 @@ describe('document', function() {
   });
 
   it('setting a positional path does not cast value to array', function() {
-    const doc = new TestDocument;
+    const doc = new TestDocument();
     doc.init({ numbers: [1, 3] });
     assert.equal(doc.numbers[0], 1);
     assert.equal(doc.numbers[1], 3);
@@ -1428,7 +1476,7 @@ describe('document', function() {
     });
 
     it('validator should run only once per sub-doc gh-1743', async function() {
-      this.timeout(process.env.TRAVIS ? 8000 : 4500);
+      this.timeout(4500);
 
       let count = 0;
       const db = start();
@@ -1520,12 +1568,12 @@ describe('document', function() {
         assert.ok(n1.equals(n2));
       });
       it('with ObjectId _ids', function() {
-        let id = new mongoose.Types.ObjectId;
+        let id = new mongoose.Types.ObjectId();
         let o1 = new O({ _id: id });
         let o2 = new O({ _id: id });
         assert.ok(o1.equals(o2));
 
-        id = String(new mongoose.Types.ObjectId);
+        id = String(new mongoose.Types.ObjectId());
         o1 = new O({ _id: id });
         o2 = new O({ _id: id });
         assert.ok(o1.equals(o2));
@@ -1536,8 +1584,8 @@ describe('document', function() {
         assert.ok(n1.equals(n2));
       });
       it('with _id disabled (gh-1687)', function() {
-        const m1 = new M;
-        const m2 = new M;
+        const m1 = new M();
+        const m2 = new M();
         assert.doesNotThrow(function() {
           m1.equals(m2);
         });
@@ -1714,8 +1762,8 @@ describe('document', function() {
         get((v, virtual, doc) => `${doc.name.first} ${doc.name.last}`).
         set((v, virtual, doc) => {
           const parts = v.split(' ');
-          doc.name.first = parts.slice(0, parts.length - 1).join(' ');
           doc.name.last = parts[parts.length - 1];
+          doc.name.first = parts.slice(0, parts.length - 1).join(' ');
         });
       const Model = db.model('Person', schema);
 
@@ -2457,7 +2505,7 @@ describe('document', function() {
     it('single embedded schemas with methods (gh-3534)', function() {
       const personSchema = new Schema({ name: String });
       personSchema.methods.firstName = function() {
-        return this.name.substr(0, this.name.indexOf(' '));
+        return this.name.substring(0, this.name.indexOf(' '));
       };
 
       const bandSchema = new Schema({ leadSinger: personSchema });
@@ -3683,6 +3731,11 @@ describe('document', function() {
 
       assert.deepEqual(
         kitty.modifiedPaths(),
+        ['surnames']
+      );
+
+      assert.deepEqual(
+        kitty.modifiedPaths({ includeChildren: true }),
         ['surnames', 'surnames.docarray']
       );
     });
@@ -3968,27 +4021,28 @@ describe('document', function() {
       assert.equal(p.children[0].favorites.color, 'Red');
     });
 
-    it('handles selected nested elements with defaults (gh-4739)', function(done) {
+    it('handles selected nested elements with defaults (gh-4739) (gh-11376)', async function() {
       const userSchema = new Schema({
         preferences: {
           sleep: { type: Boolean, default: false },
           test: { type: Boolean, default: true }
         },
+        arr: [{ test: Number, test2: Number }],
         name: String
       });
 
       const User = db.model('User', userSchema);
 
-      const user = { name: 'test' };
-      User.collection.insertOne(user, function(error) {
-        assert.ifError(error);
-        User.findById(user, { 'preferences.sleep': 1, name: 1 }, function(error, user) {
-          assert.ifError(error);
-          assert.strictEqual(user.preferences.sleep, false);
-          assert.ok(!user.preferences.test);
-          done();
-        });
-      });
+      let user = { name: 'test' };
+      await User.collection.insertOne(user);
+      user = await User.findById(user, { 'preferences.sleep': 1, name: 1 });
+      assert.strictEqual(user.preferences.sleep, false);
+      assert.ok(!user.preferences.test);
+
+      user = await User.findById(user, { 'arr.test': 1 });
+      assert.strictEqual(user.name, undefined);
+      assert.strictEqual(user.toObject().preferences, undefined);
+      assert.deepEqual(user.toObject().arr, []);
     });
 
     it('handles mark valid in subdocs correctly (gh-4778)', function() {
@@ -5013,7 +5067,7 @@ describe('document', function() {
           return Parent.findOne();
         }).
         then(function(doc) {
-          assert.deepEqual(doc.toObject().child, {});
+          assert.deepEqual(doc.toObject({ minimize: false }).child, {});
           done();
         }).
         catch(done);
@@ -5377,8 +5431,29 @@ describe('document', function() {
 
       doc.toObject({ getters: false });
       assert.equal(called, 1);
+    });
 
-      return Promise.resolve();
+    it('calls subdocument getters if child schema has getters: true (gh-12105)', function() {
+      let called = 0;
+
+      const childSchema = new Schema({
+        _id: false,
+        value: {
+          type: String,
+          get: function(v) {
+            ++called;
+            return v.toUpperCase();
+          }
+        }
+      }, { toJSON: { getters: true } });
+      const schema = new Schema({ name: childSchema });
+      const Test = db.model('Test', schema);
+
+      const doc = new Test({ name: { value: 'John Smith' } });
+
+      const res = doc.toJSON();
+      assert.equal(called, 1);
+      assert.deepStrictEqual(res.name, { value: 'JOHN SMITH' });
     });
 
     it('setting doc array to array of top-level docs works (gh-5632)', function(done) {
@@ -5454,7 +5529,7 @@ describe('document', function() {
 
       const Test = db.model('Test', schema);
 
-      const test = new Test;
+      const test = new Test();
       assert.strictEqual(test.s, '');
 
       // use native driver directly to insert an empty doc
@@ -6057,7 +6132,7 @@ describe('document', function() {
         randomID: { type: Number, default: generateRandomID }
       }));
 
-      const post = new TestDefaultsWithFunction;
+      const post = new TestDefaultsWithFunction();
       assert.equal(post.get('randomID'), 1);
       assert.equal(called, 1);
 
@@ -6320,7 +6395,6 @@ describe('document', function() {
         }
       });
       const Model = db.model('Test', schema);
-
 
       await Model.create({
         roles: [
@@ -7330,7 +7404,6 @@ describe('document', function() {
 
     const User = db.model('User', userSchema);
 
-
     const position = {
       geometry: {
         type: 'Point',
@@ -7435,11 +7508,20 @@ describe('document', function() {
     const schema = new mongoose.Schema({ nested: { schema: String } });
     const Model = db.model('Test', schema);
 
-
     await Model.collection.insertOne({ nested: { schema: 'test' } });
 
     const doc = await Model.findOne();
     assert.strictEqual(doc.nested.schema, 'test');
+  });
+
+  it('handles nested properties named `on` (gh-11656)', async function() {
+    const schema = new mongoose.Schema({ on: String }, { supressReservedKeysWarning: true });
+    const Model = db.model('Test', schema);
+
+    await Model.create({ on: 'test string' });
+
+    const doc = await Model.findOne();
+    assert.strictEqual(doc.on, 'test string');
   });
 
   describe('overwrite() (gh-7830)', function() {
@@ -8126,7 +8208,7 @@ describe('document', function() {
     assert.deepEqual(Object.keys(err.errors), ['age']);
   });
 
-  it('array push with $position (gh-4322)', async function() {
+  it('array push with $position (gh-14244) (gh-4322)', async function() {
     const schema = Schema({
       nums: [Number]
     });
@@ -8150,12 +8232,13 @@ describe('document', function() {
       $each: [0],
       $position: 0
     });
-    assert.throws(() => {
-      doc.nums.push({ $each: [5] });
-    }, /Cannot call.*multiple times/);
-    assert.throws(() => {
-      doc.nums.push(5);
-    }, /Cannot call.*multiple times/);
+    assert.deepStrictEqual(doc.nums.$__getAtomics(), [['$push', { $each: [0], $position: 0 }]]);
+
+    doc.nums.push({ $each: [5] });
+    assert.deepStrictEqual(doc.nums.$__getAtomics(), [['$set', [0, 1, 2, 3, 4, 5]]]);
+
+    doc.nums.push({ $each: [0.5], $position: 1 });
+    assert.deepStrictEqual(doc.nums.$__getAtomics(), [['$set', [0, 0.5, 1, 2, 3, 4, 5]]]);
   });
 
   it('setting a path to a single nested document should update the single nested doc parent (gh-8400)', function() {
@@ -8308,7 +8391,6 @@ describe('document', function() {
       locations: { type: [locationSchema], default: [{}] }
     });
     const Organization = db.model('Test', organizationSchema);
-
 
     const org = new Organization();
     org.set('name', 'MongoDB');
@@ -8776,7 +8858,7 @@ describe('document', function() {
     assert.ok(!user.updatedAt);
   });
 
-  it('Sets default when passing undefined as value for a key in a nested subdoc (gh-9039)', async function() {
+  it('Sets default when passing undefined as value for a key in a nested subdoc (gh-12102) (gh-9039)', async function() {
     const Test = db.model('Test', {
       nested: {
         prop: {
@@ -8786,9 +8868,11 @@ describe('document', function() {
       }
     });
 
-
-    const doc = await Test.create({ nested: { prop: undefined } });
+    const obj = { nested: { prop: undefined } };
+    const doc = await Test.create(obj);
     assert.equal(doc.nested.prop, 'some default value');
+
+    assert.deepStrictEqual(obj, { nested: { prop: undefined } });
   });
 
   it('allows accessing $locals when initializing (gh-9098)', function() {
@@ -9113,7 +9197,6 @@ describe('document', function() {
 
     const Test = db.model('Test', schema);
 
-
     const foo = new Test({ bar: 'bar' });
     await foo.save();
     assert.ok(!foo.isModified('bar'));
@@ -9160,6 +9243,49 @@ describe('document', function() {
     assert.ok(foo.isModified('nested'));
     assert.ok(foo.isModified('subdoc'));
     assert.ok(foo.isModified('subdoc.bar'));
+  });
+
+  it('does not unmark modified if there is no initial value (gh-9396)', async function() {
+    const IClientSchema = new Schema({
+      jwt: {
+        token_crypt: { type: String, template: false, maxSize: 8 * 1024 },
+        token_salt: { type: String, template: false }
+      }
+    });
+
+    const encrypt = function(doc, path, value) {
+      doc.set(path + '_crypt', value + '_crypt');
+      doc.set(path + '_salt', value + '_salt');
+    };
+
+    const decrypt = function(doc, path) {
+      return doc.get(path + '_crypt').replace('_crypt', '');
+    };
+
+    IClientSchema.virtual('jwt.token')
+      .get(function() {
+        return decrypt(this, 'jwt.token');
+      })
+      .set(function(value) {
+        encrypt(this, 'jwt.token', value);
+      });
+
+
+    const iclient = db.model('Test', IClientSchema);
+    const test = new iclient({
+      jwt: {
+        token: 'firstToken'
+      }
+    });
+
+    await test.save();
+    const entry = await iclient.findById(test._id).orFail();
+    entry.set('jwt.token', 'secondToken');
+    entry.set(entry.toJSON());
+    await entry.save();
+
+    const { jwt } = await iclient.findById(test._id).orFail();
+    assert.strictEqual(jwt.token, 'secondToken');
   });
 
   it('correctly tracks saved state for deeply nested objects (gh-10773) (gh-9396)', async function() {
@@ -10724,6 +10850,19 @@ describe('document', function() {
     await doc.save();
   });
 
+  it('ensures that doc.ownerDocument() and doc.parent() by default return this on the root document (gh-10884)', async function() {
+    const userSchema = new mongoose.Schema({
+      name: String,
+      email: String
+    });
+
+    const Event = db.model('Rainbow', userSchema);
+
+    const e = new Event({ name: 'test' });
+    assert.strictEqual(e, e.parent());
+    assert.strictEqual(e, e.ownerDocument());
+  });
+
   it('catches errors in `required` functions (gh-10968)', async function() {
     const TestSchema = new Schema({
       url: {
@@ -10760,6 +10899,1684 @@ describe('document', function() {
     x = await Test.create({});
     await x.set(unTrusted);
     assert.equal(x.someFn(), 'good');
+  });
 
+  it('allows setting nested to instance of document (gh-11011)', async function() {
+    const TransactionSchema = new Schema({
+      payments: [
+        {
+          id: { type: String },
+          terminal: {
+            _id: { type: Schema.Types.ObjectId },
+            name: { type: String }
+          }
+        }
+      ]
+    });
+
+    const TerminalSchema = new Schema({
+      name: { type: String },
+      apiKey: { type: String }
+    });
+
+    const Transaction = db.model('Test1', TransactionSchema);
+    const Terminal = db.model('Test2', TerminalSchema);
+
+    const transaction = new Transaction();
+    const terminal = new Terminal({
+      name: 'Front desk',
+      apiKey: 'somesecret'
+    });
+    transaction.payments.push({
+      id: 'testPayment',
+      terminal: terminal
+    });
+    assert.equal(transaction.payments[0].terminal.name, 'Front desk');
+  });
+
+  it('cleans modified paths on deeply nested subdocuments (gh-11060)', async function() {
+    const childSchema = new Schema({ status: String });
+
+    const deploymentsSchema = new Schema({
+      before: { type: childSchema, required: false },
+      after: { type: childSchema, required: false }
+    }, { _id: false });
+
+    const testSchema = new Schema({
+      name: String,
+      deployments: { type: deploymentsSchema }
+    });
+    const Test = db.model('Test', testSchema);
+
+    await Test.create({
+      name: 'hello',
+      deployments: {
+        before: { status: 'foo' }
+      }
+    });
+
+    const entry = await Test.findOne({ name: 'hello' });
+    const deployment = entry.deployments.before;
+    deployment.status = 'bar';
+    entry.deployments.before = null;
+    entry.deployments.after = deployment;
+
+    assert.ok(!entry.isDirectModified('deployments.before.status'));
+    await entry.save();
+  });
+
+  it('can manually populate subdocument refs (gh-10856)', async function() {
+    // Bar model, has a name property and some other properties that we are interested in
+    const BarSchema = new Schema({
+      name: String,
+      more: String,
+      another: Number
+    });
+    const Bar = db.model('Bar', BarSchema);
+
+    // Denormalised Bar schema with just the name, for use on the Foo model
+    const BarNameSchema = new Schema({
+      _id: {
+        type: Schema.Types.ObjectId,
+        ref: 'Bar'
+      },
+      name: String
+    });
+
+    // Foo model, which contains denormalized bar data (just the name)
+    const FooSchema = new Schema({
+      something: String,
+      other: Number,
+      bar: {
+        type: BarNameSchema,
+        ref: 'Bar'
+      }
+    });
+    const Foo = db.model('Foo', FooSchema);
+
+    const bar2 = await Bar.create({
+      name: 'I am another Bar',
+      more: 'With even more data',
+      another: 3
+    });
+    const foo2 = await Foo.create({
+      something: 'I am another Foo',
+      other: 4
+    });
+
+    foo2.bar = bar2;
+    assert.ok(foo2.bar instanceof Bar);
+    assert.equal(foo2.bar.another, 3);
+    assert.equal(foo2.get('bar.another'), 3);
+
+    const obj = foo2.toObject({ depopulate: true });
+    assert.equal(obj.bar.name, 'I am another Bar');
+    assert.strictEqual(obj.bar.another, undefined);
+
+    await foo2.save();
+    const fromDb = await Foo.findById(foo2).lean();
+    assert.strictEqual(fromDb.bar.name, 'I am another Bar');
+    assert.strictEqual(fromDb.bar.another, undefined);
+  });
+
+  it('can manually populate subdocument refs in `create()` (gh-10856)', async function() {
+    // Bar model, has a name property and some other properties that we are interested in
+    const BarSchema = new Schema({
+      name: String,
+      more: String,
+      another: Number
+    });
+    const Bar = db.model('Bar', BarSchema);
+
+    // Denormalised Bar schema with just the name, for use on the Foo model
+    const BarNameSchema = new Schema({
+      _id: {
+        type: Schema.Types.ObjectId,
+        ref: 'Bar'
+      },
+      name: String
+    });
+
+    // Foo model, which contains denormalized bar data (just the name)
+    const FooSchema = new Schema({
+      something: String,
+      other: Number,
+      bar: {
+        type: BarNameSchema,
+        ref: 'Bar'
+      }
+    });
+    const Foo = db.model('Foo', FooSchema);
+
+    const bar = await Bar.create({
+      name: 'I am Bar',
+      more: 'With more data',
+      another: 2
+    });
+    const foo = await Foo.create({
+      something: 'I am Foo',
+      other: 1,
+      bar
+    });
+
+    assert.ok(foo.bar instanceof Bar);
+    assert.equal(foo.bar.another, 2);
+    assert.equal(foo.get('bar.another'), 2);
+  });
+
+  it('populating subdocument refs underneath maps throws (gh-12494) (gh-10856)', async function() {
+    // Bar model, has a name property and some other properties that we are interested in
+    const BarSchema = new Schema({
+      name: String,
+      more: String,
+      another: Number
+    });
+    const Bar = db.model('Bar', BarSchema);
+
+    // Denormalised Bar schema with just the name, for use on the Foo model
+    const BarNameSchema = new Schema({
+      _id: {
+        type: Schema.Types.ObjectId,
+        ref: 'Bar'
+      },
+      name: String
+    });
+
+    // Foo model, which contains denormalized bar data (just the name)
+    const FooSchema = new Schema({
+      something: String,
+      other: Number,
+      map: {
+        type: Map,
+        of: {
+          type: BarNameSchema,
+          ref: 'Bar'
+        }
+      }
+    });
+    const Foo = db.model('Foo', FooSchema);
+
+    const bar = await Bar.create({
+      name: 'I am Bar',
+      more: 'With more data',
+      another: 2
+    });
+    const { _id } = await Foo.create({
+      something: 'I am Foo',
+      other: 1,
+      map: { test: bar }
+    });
+
+    const err = await Foo.findById(_id).populate('map').then(() => null, err => err);
+    assert.ok(err);
+    assert.ok(err.message.includes('Cannot manually populate single nested subdoc underneath Map'), err.message);
+  });
+
+  it('handles save with undefined nested doc under subdoc (gh-11110)', async function() {
+    const testSchema = new Schema({
+      level_1_array: [new Schema({
+        level_1: {
+          level_2: new Schema({
+            level_3: {
+              name_3: String,
+              level_4: {
+                name_4: String
+              }
+            }
+          })
+        }
+      })]
+    });
+
+    const Test = db.model('Test', testSchema);
+
+    const doc = {
+      level_1_array: [{
+        level_1: {
+          level_2: {
+            level_3: {
+              name_3: 'test',
+              level_4: undefined
+            }
+          }
+        }
+      }]
+    };
+
+    await new Test(doc).save();
+  });
+
+  it('correctly handles modifying array subdoc after setting array subdoc to same value (gh-11172)', async function() {
+    const Order = db.model('Order', new Schema({
+      cumulativeConsumption: [{
+        _id: false,
+        unit: String,
+        value: Number
+      }]
+    }));
+
+    await Order.create({
+      cumulativeConsumption: [{ unit: 'foo', value: 123 }, { unit: 'bar', value: 42 }]
+    });
+
+    const doc = await Order.findOne();
+    doc.cumulativeConsumption = doc.toObject().cumulativeConsumption;
+
+    const match = doc.cumulativeConsumption.find(o => o.unit === 'bar');
+    match.value = 43;
+    match.unit = 'baz';
+
+    assert.ok(doc.isModified());
+    assert.ok(doc.isModified('cumulativeConsumption.1'));
+  });
+
+  it('handles `String` with `type` (gh-11199)', function() {
+    String.type = String;
+    const schema = new mongoose.Schema({
+      something: String,
+      somethingElse: { type: String, trim: true }
+    });
+
+    const Test = db.model('Test', schema);
+    const doc = new Test({ something: 'test', somethingElse: 'test 2' });
+    assert.equal(typeof doc.something, 'string');
+    assert.equal(typeof doc.somethingElse, 'string');
+    delete String.type;
+  });
+
+  it('applies subdocument defaults when projecting dotted subdocument fields', async function() {
+    const version = await start.mongodVersion();
+    if (version[0] < 5) {
+      return this.skip();
+    }
+
+    const grandChildSchema = new mongoose.Schema({
+      name: {
+        type: mongoose.Schema.Types.String,
+        default: () => 'grandchild'
+      }
+    });
+
+    const childSchema = new mongoose.Schema({
+      name: {
+        type: mongoose.Schema.Types.String,
+        default: () => 'child'
+      },
+      grandChild: {
+        type: grandChildSchema,
+        default: () => ({})
+      }
+    });
+
+    const parentSchema = new mongoose.Schema({
+      name: mongoose.Schema.Types.String,
+      child: {
+        type: childSchema,
+        default: () => ({})
+      }
+    });
+
+    const ParentModel = db.model('Parent', parentSchema);
+    // insert an object without mongoose adding missing defaults
+    const result = await db.collection('Parent').insertOne({ name: 'parent' });
+
+    // ensure that the defaults are populated when no projections are used
+    const doc = await ParentModel.findById(result.insertedId).exec();
+    assert.equal(doc.name, 'parent');
+    assert.equal(doc.child.name, 'child');
+    assert.equal(doc.child.grandChild.name, 'grandchild');
+
+    // ensure that defaults are populated when using an object projection
+    const projectedDoc = await ParentModel.findById(result.insertedId, {
+      name: 1,
+      child: {
+        name: 1,
+        grandChild: {
+          name: 1
+        }
+      }
+    }).exec();
+    assert.equal(projectedDoc.name, 'parent');
+    assert.equal(projectedDoc.child.name, 'child');
+    assert.equal(projectedDoc.child.grandChild.name, 'grandchild');
+
+    // ensure that defaults are populated when using dotted path projections
+    const dottedProjectedDoc = await ParentModel.findById(result.insertedId, {
+      name: 1,
+      'child.name': 1,
+      'child.grandChild.name': 1
+    }).exec();
+    assert.equal(dottedProjectedDoc.name, 'parent');
+    assert.equal(dottedProjectedDoc.child.name, 'child');
+    assert.equal(dottedProjectedDoc.child.grandChild.name, 'grandchild');
+  });
+
+  it('handles initing nested properties in non-strict documents (gh-11309)', async function() {
+    const NestedSchema = new Schema({}, {
+      id: false,
+      _id: false,
+      strict: false
+    });
+
+    const ItemSchema = new Schema({
+      name: {
+        type: String
+      },
+      nested: NestedSchema
+    });
+
+    const Test = db.model('Test', ItemSchema);
+
+    const item = await Test.create({
+      nested: {
+        foo: {
+          bar: 55
+        }
+      }
+    });
+
+    // Modify nested data
+    item.nested.foo.bar = 66;
+    item.markModified('nested.foo.bar');
+    await item.save();
+
+    const reloaded = await Test.findOne({ _id: item._id });
+
+    assert.deepEqual(reloaded.nested.foo, { bar: 66 });
+    assert.ok(!reloaded.nested.foo.$__isNested);
+    assert.strictEqual(reloaded.nested.foo.bar, 66);
+  });
+
+  it('saves changes when setting a nested path to itself (gh-11395)', async function() {
+    const Test = db.model('Test', new Schema({
+      co: { value: Number }
+    }));
+
+    await Test.create({});
+
+    const doc = await Test.findOne();
+    doc.co.value = 123;
+    doc.co = doc.co;
+    await doc.save();
+
+    const res = await Test.findById(doc._id);
+    assert.strictEqual(res.co.value, 123);
+  });
+
+  it('avoids setting nested properties on top-level document when init-ing with strict: false (gh-11526) (gh-11309)', async function() {
+    const testSchema = Schema({ name: String }, { strict: false, strictQuery: false });
+    const Test = db.model('Test', testSchema);
+
+    const doc = new Test();
+    doc.init({
+      details: {
+        person: {
+          name: 'Baz'
+        }
+      }
+    });
+
+    assert.strictEqual(doc.name, void 0);
+  });
+
+  it('handles deeply nested subdocuments when getting paths to validate (gh-11501)', async function() {
+    const schema = Schema({
+      parameters: {
+        test: {
+          type: new Schema({
+            value: 'Mixed'
+          })
+        }
+      },
+      nested: Schema({
+        parameters: {
+          type: Map,
+          of: Schema({
+            value: 'Mixed'
+          })
+        }
+      })
+    });
+    const Test = db.model('Test', schema);
+
+    await Test.create({
+      nested: {
+        parameters: new Map([['test', { answer: 42 }]])
+      }
+    });
+  });
+
+  it('handles casting array of spread documents (gh-11522)', async function() {
+    const Test = db.model('Test', new Schema({
+      arr: [{ _id: false, prop1: String, prop2: String }]
+    }));
+
+    const doc = new Test({ arr: [{ prop1: 'test' }] });
+
+    doc.arr = doc.arr.map(member => ({
+      ...member,
+      prop2: 'foo'
+    }));
+
+    assert.deepStrictEqual(doc.toObject().arr, [{ prop1: 'test', prop2: 'foo' }]);
+
+    await doc.validate();
+  });
+
+  it('avoids setting modified on subdocument defaults (gh-11528)', async function() {
+    const textSchema = new Schema({
+      text: { type: String }
+    }, { _id: false });
+
+    const messageSchema = new Schema({
+      body: { type: textSchema, default: { text: 'hello' } },
+      date: { type: Date, default: Date.now }
+    });
+
+
+    const Message = db.model('Test', messageSchema);
+
+    const entry = await Message.create({});
+
+    const failure = await Message.findById({ _id: entry._id });
+
+    assert.deepEqual(failure.modifiedPaths(), []);
+  });
+
+  it('works when passing dot notation to mixed property (gh-1946)', async function() {
+    const schema = Schema({
+      name: String,
+      mix: { type: Schema.Types.Mixed },
+      nested: { prop: String }
+    });
+    const M = db.model('Test', schema);
+    const m1 = new M({ name: 'test', 'mix.val': 'foo', 'nested.prop': 'bar' });
+    assert.equal(m1.name, 'test');
+    assert.equal(m1.mix.val, 'foo');
+    assert.equal(m1.nested.prop, 'bar');
+    await m1.save();
+    assert.equal(m1.name, 'test');
+    assert.equal(m1.mix.val, 'foo');
+
+    const doc = await M.findById(m1);
+    assert.equal(doc.name, 'test');
+    assert.equal(doc.mix.val, 'foo');
+  });
+
+  it('correctly validates deeply nested document arrays (gh-11564)', async function() {
+    const testSchemaSub3 = new mongoose.Schema({
+      name: {
+        type: String,
+        required: true
+      }
+    });
+
+    const testSchemaSub2 = new mongoose.Schema({
+      name: {
+        type: String,
+        required: true
+      },
+      list: [testSchemaSub3]
+    });
+
+    const testSchemaSub1 = new mongoose.Schema({
+      name: {
+        type: String,
+        required: true
+      },
+      list: [testSchemaSub2]
+    });
+
+    const testSchema = new mongoose.Schema({
+      name: String,
+      list: [testSchemaSub1]
+    });
+
+    const testModel = db.model('Test', testSchema);
+
+    await testModel.create({
+      name: 'lvl1',
+      list: [{
+        name: 'lvl2',
+        list: [{
+          name: 'lvl3'
+        }]
+      }]
+    });
+  });
+
+  it('reruns validation when modifying a document array path under a nested path after save (gh-11672)', async function() {
+    const ChildSchema = new Schema({
+      price: {
+        type: Number,
+        validate: function(val) {
+          return val > 0;
+        }
+      }
+    });
+
+    const ParentSchema = new Schema({
+      rootField: { nestedSubdocArray: [ChildSchema] }
+    });
+    const Test = db.model('Test', ParentSchema);
+
+    const parentDoc = new Test({
+      rootField: {
+        nestedSubdocArray: [
+          {
+            price: 1
+          }
+        ]
+      }
+    });
+
+    await parentDoc.save();
+
+    // Now we try editing to an invalid value which should throw
+    parentDoc.rootField.nestedSubdocArray[0].price = -1;
+    const err = await parentDoc.save().then(() => null, err => err);
+
+    assert.ok(err);
+    assert.equal(err.name, 'ValidationError');
+    assert.ok(err.message.includes('failed for path'), err.message);
+    assert.ok(err.message.includes('value `-1`'), err.message);
+  });
+
+  it('avoids setting nested paths to null when they are set to `undefined` (gh-11723)', async function() {
+    const nestedSchema = new mongoose.Schema({
+      count: Number
+    }, { _id: false });
+
+    const mySchema = new mongoose.Schema({
+      name: String,
+      nested: { count: Number },
+      nestedSchema: nestedSchema
+    }, { minimize: false });
+
+    const Test = db.model('Test', mySchema);
+
+    const instance1 = new Test({ name: 'test1', nested: { count: 1 }, nestedSchema: { count: 1 } });
+    await instance1.save();
+
+    const update = { nested: { count: undefined }, nestedSchema: { count: undefined } };
+    instance1.set(update);
+    await instance1.save();
+
+    const doc = await Test.findById(instance1);
+    assert.strictEqual(doc.nested.count, undefined);
+    assert.strictEqual(doc.nestedSchema.count, undefined);
+  });
+
+  it('cleans modified subpaths when setting nested path under array to null when subpaths are modified (gh-11764)', async function() {
+    const Test = db.model('Test', new Schema({
+      list: [{
+        quantity: {
+          value: Number,
+          unit: String
+        }
+      }]
+    }));
+
+    let doc = await Test.create({ list: [{ quantity: { value: 1, unit: 'case' } }] });
+
+    doc = await Test.findById(doc);
+    doc.list[0].quantity.value = null;
+    doc.list[0].quantity.unit = null;
+    doc.list[0].quantity = null;
+
+    await doc.save();
+
+    doc = await Test.findById(doc);
+    assert.strictEqual(doc.list[0].toObject().quantity, null);
+  });
+
+  it('avoids manually populating document that is manually populated in another doc with different unpopulatedValue (gh-11442) (gh-11008)', async function() {
+    const BarSchema = new Schema({
+      name: String,
+      more: String
+    });
+    const Bar = db.model('Bar', BarSchema);
+
+    // Denormalised Bar schema with just the name, for use on the Foo model
+    const BarNameSchema = new Schema({
+      _id: {
+        type: Schema.Types.ObjectId,
+        ref: 'Bar'
+      },
+      name: String
+    });
+
+    // Foo model, which contains denormalized bar data (just the name)
+    const FooSchema = new Schema({
+      something: String,
+      other: Number,
+      bar: {
+        type: BarNameSchema,
+        ref: 'Bar'
+      }
+    });
+    const Foo = db.model('Foo', FooSchema);
+
+    const Baz = db.model('Baz', new Schema({ bar: { type: 'ObjectId', ref: 'Bar' } }));
+
+    const bar = await Bar.create({
+      name: 'I am another Bar',
+      more: 'With even more data'
+    });
+    const foo = await Foo.create({
+      something: 'I am another Foo',
+      other: 4
+    });
+    foo.bar = bar;
+    const baz = await Baz.create({});
+    baz.bar = bar;
+
+    assert.ok(foo.populated('bar'));
+    assert.ok(!baz.populated('bar'));
+
+    let res = foo.toObject({ depopulate: true });
+    assert.strictEqual(res.bar._id.toString(), bar._id.toString());
+    assert.strictEqual(res.bar.name, 'I am another Bar');
+
+    res = baz.toObject({ depopulate: true });
+    assert.strictEqual(res.bar.toString(), bar._id.toString());
+
+    const bar2 = await Bar.create({
+      name: 'test2'
+    });
+    baz.bar = bar2;
+    assert.ok(baz.populated('bar'));
+
+    const baz2 = await Baz.create({});
+    baz2.bar = bar2;
+    assert.ok(baz.populated('bar'));
+  });
+
+  it('$getAllSubdocs gets document arrays underneath a nested path (gh-11917)', function() {
+    const nestedSettingsSchema = new Schema({
+      value: String,
+      active: Boolean
+    });
+
+    const userSettingsSchema = new Schema({
+      nestedSettings: {
+        settingsProps: [nestedSettingsSchema]
+      }
+    });
+
+    const userSchema = new Schema({
+      first_name: String,
+      last_name: String,
+      settings: userSettingsSchema
+    });
+
+    const User = db.model('User', userSchema);
+
+    const doc = new User({
+      settings: {
+        nestedSettings: {
+          settingsProps: [{ value: 'test', active: true }]
+        }
+      }
+    });
+
+    const subdocs = doc.$getAllSubdocs();
+    assert.equal(subdocs.length, 2);
+    assert.equal(subdocs[0].value, 'test');
+    assert.ok(subdocs[1].nestedSettings);
+  });
+
+  it('handles validation errors on deeply nested subdocuments underneath a nested path (gh-12021)', async function() {
+    const SubSubSchema = new mongoose.Schema(
+      {
+        from: {
+          type: mongoose.Schema.Types.String,
+          required: true
+        }
+      },
+      { _id: false }
+    );
+
+    const SubSchema = new mongoose.Schema(
+      {
+        nested: {
+          type: SubSubSchema,
+          required: false // <-- important
+        }
+      },
+      { _id: false }
+    );
+
+    const TestLeafSchema = new mongoose.Schema({
+      testProp: {
+        testSubProp: {
+          type: SubSchema,
+          required: true
+        }
+      }
+    });
+
+    const TestLeafModel = mongoose.model('test-leaf-model', TestLeafSchema);
+
+    const testModelInstance = new TestLeafModel({
+      testProp: {
+        testSubProp: {
+          nested: { from: null }
+        }
+      }
+    });
+
+    const err = await testModelInstance.validate().then(() => null, err => err);
+    assert.ok(err);
+    assert.ok(err.errors['testProp.testSubProp.nested.from']);
+  });
+
+  describe('$inc (gh-11915)', function() {
+    describe('top-level path', function() {
+      let Test;
+
+      beforeEach(function() {
+        const schema = new Schema({
+          counter: Number
+        });
+        Test = db.model('Test', schema);
+      });
+
+      it('sends a $inc command for a given path', async function() {
+        await Test.create({ counter: 0 });
+        const doc = await Test.findOne();
+        assert.strictEqual(doc.counter, 0);
+        const doc2 = await Test.findOne();
+
+        doc2.counter = 1;
+        await doc2.save();
+
+        doc.$inc('counter', 1);
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.counter, 2);
+      });
+
+      it('calls setters on the value passed to `$inc()` (gh-13158)', async function() {
+        const called = [];
+        const Test2 = db.model('Test2', Schema({
+          counter: {
+            type: Number,
+            set: v => { called.push(v); return v.toFixed(2); }
+          }
+        }));
+        const doc = await Test2.create({ counter: 2 });
+        assert.deepEqual(called, [2]);
+
+        doc.$inc('counter', 1.14159);
+        assert.deepEqual(called, [2, 3.14159]);
+        assert.equal(doc.counter, 3.14);
+        await doc.save();
+
+        const res = await Test2.findById(doc);
+        assert.equal(res.counter, 3.14);
+      });
+
+      it('avoids updating value if setter fails (gh-13158)', async function() {
+        const called = [];
+        const Test2 = db.model('Test2', Schema({
+          counter: {
+            type: Number,
+            set: v => {
+              called.push(v);
+              if (v > 3) {
+                throw new Error('Oops!');
+              }
+              return v;
+            }
+          }
+        }));
+        const doc = await Test2.create({ counter: 2 });
+        assert.deepEqual(called, [2]);
+
+        doc.$inc('counter', 3);
+        assert.deepEqual(called, [2, 5]);
+        assert.equal(doc.counter, 2);
+        const err = await doc.save().then(() => null, err => err);
+        assert.ok(err);
+        assert.ok(err.errors['counter']);
+      });
+
+      it('works as a $set if the document is new', async function() {
+        const doc = new Test({ counter: 0 });
+        doc.$inc('counter', 2);
+        assert.equal(doc.counter, 2);
+
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.counter, 2);
+      });
+
+      it('treats as a $set if set after $inc', async function() {
+        await Test.create({ counter: 0 });
+        const doc = await Test.findOne();
+
+        doc.$inc('counter', 2);
+        doc.counter = 5;
+        assert.deepStrictEqual(doc.getChanges(), { $set: { counter: 5 } });
+        await doc.save();
+
+        const res = await Test.findOne();
+        assert.equal(res.counter, 5);
+      });
+
+      it('tries to cast to number', async function() {
+        await Test.create({ counter: 0 });
+        const doc = await Test.findOne();
+
+        doc.$inc('counter', '2');
+        assert.deepStrictEqual(doc.getChanges(), { $inc: { counter: 2 } });
+        await doc.save();
+
+        const res = await Test.findOne();
+        assert.equal(res.counter, 2);
+      });
+
+      it('stores CastError if can\'t convert to number', async function() {
+        await Test.create({ counter: 0 });
+        const doc = await Test.findOne();
+
+        doc.$inc('counter', 'foobar');
+        const err = await doc.save().then(() => null, err => err);
+        assert.ok(err);
+        assert.equal(err.errors['counter'].name, 'CastError');
+      });
+    });
+
+    describe('nested paths', function() {
+      let Test;
+
+      beforeEach(function() {
+        const schema = new Schema({
+          nested: {
+            counter: Number
+          }
+        });
+        Test = db.model('Test', schema);
+      });
+
+      it('handles nested paths', async function() {
+        await Test.create({ nested: { counter: 0 } });
+        const doc = await Test.findOne();
+
+        doc.$inc('nested.counter', 2);
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.nested.counter, 2);
+      });
+
+      it('treats as $set if overwriting nested path', async function() {
+        await Test.create({ nested: { counter: 0 } });
+        const doc = await Test.findOne();
+
+        doc.$inc('nested.counter', 2);
+        doc.nested.counter += 3;
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.nested.counter, 5);
+      });
+    });
+
+    describe('subdocuments', function() {
+      let Test;
+
+      beforeEach(function() {
+        const schema = new Schema({
+          subdoc: new Schema({
+            counter: Number
+          })
+        });
+        Test = db.model('Test', schema);
+      });
+
+      it('handles paths underneath subdocuments', async function() {
+        await Test.create({ subdoc: { counter: 0 } });
+        const doc = await Test.findOne();
+
+        doc.$inc('subdoc.counter', 2);
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.subdoc.counter, 2);
+      });
+
+      it('treats as a $set if setting subdocument after $inc', async function() {
+        await Test.create({ subdoc: { counter: 0 } });
+        const doc = await Test.findOne();
+
+        doc.$inc('subdoc.counter', 2);
+        doc.subdoc = { counter: 5 };
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.subdoc.counter, 5);
+      });
+    });
+
+    describe('document array', function() {
+      let Test;
+
+      beforeEach(function() {
+        const schema = new Schema({
+          docArr: [{ counter: Number }]
+        });
+        Test = db.model('Test', schema);
+      });
+
+      it('handles paths underneath subdocuments', async function() {
+        await Test.create({ docArr: [{ counter: 0 }] });
+        const doc = await Test.findOne();
+
+        doc.docArr[0].$inc('counter');
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.docArr[0].counter, 1);
+      });
+
+      it('works on pushed subdocs', async function() {
+        await Test.create({ docArr: [] });
+        const doc = await Test.findOne();
+
+        doc.docArr.push({ counter: 0 });
+        doc.docArr[0].$inc('counter');
+        await doc.save();
+
+        const res = await Test.findById(doc);
+        assert.equal(res.docArr[0].counter, 1);
+      });
+      it('Splice call registers path modification', async function() {
+        await Test.create({ docArr: [{ counter: 0 }, { counter: 2 }, { counter: 3 }, { counter: 4 }] });
+        const doc = await Test.findOne();
+        doc.docArr.splice(1, 0, { counter: 1 });
+        assert.equal(doc.isModified('docArr'), true);
+      });
+    });
+
+    it('stores CastError if trying to $inc a non-numeric path', async function() {
+      const schema = new Schema({
+        prop: String
+      });
+      const Test = db.model('Test', schema);
+
+      await Test.create({ prop: '' });
+      const doc = await Test.findOne();
+
+      doc.$inc('prop', 2);
+      const err = await doc.save().then(() => null, err => err);
+      assert.ok(err);
+      assert.equal(err.errors['prop'].name, 'CastError');
+    });
+    it('should correctly increment even if the document has not saved after each increment gh-13274', async function() {
+      const schema = new Schema({
+        coins: Number
+      });
+      const Test = db.model('gh13274', schema);
+      await Test.create({ coins: 0 });
+      const doc = await Test.findOne();
+      doc.$inc('coins', 1000);
+      doc.$inc('coins', 2000);
+      await doc.save();
+      const check = await Test.findOne();
+      assert.equal(check.coins, 3000);
+    });
+  });
+
+  it('supports virtuals named `isValid` (gh-12124) (gh-6262)', async function() {
+    const Schema = new mongoose.Schema({
+      test: String,
+      data: { sub: String }
+    });
+
+    Schema.virtual('isValid');
+
+    const Test = db.model('Test', Schema);
+    let doc = new Test();
+
+    assert.ok(doc.$isValid('test'));
+    await doc.save();
+
+    doc = await Test.findOne();
+
+    doc.set('isValid', true);
+    assert.ok(doc.$isValid('test'));
+
+    doc.set({ test: 'test' });
+    await doc.save();
+    assert.equal(doc.test, 'test');
+
+    doc.set({ data: { sub: 'sub' } });
+    await doc.save();
+    assert.equal(doc.data.sub, 'sub');
+  });
+
+  it('handles maps when applying defaults to nested paths (gh-12220)', async function() {
+    const nestedSchema = new mongoose.Schema({
+      1: {
+        type: Number,
+        default: 0
+      }
+    });
+
+    const topSchema = new mongoose.Schema({
+      nestedPath1: {
+        mapOfSchema: {
+          type: Map,
+          of: nestedSchema
+        }
+      }
+    });
+
+    const Test = db.model('Test', topSchema);
+
+    const data = {
+      nestedPath1: {
+        mapOfSchema: {}
+      }
+    };
+    const doc = await Test.create(data);
+
+    assert.ok(doc.nestedPath1.mapOfSchema);
+  });
+
+  it('correct context for default functions in subdocuments with init (gh-12328)', async function() {
+    let called = 0;
+
+    const subSchema = new mongoose.Schema({
+      propertyA: { type: String },
+      propertyB: {
+        type: String,
+        default: function() {
+          ++called;
+          return this.propertyA;
+        }
+      }
+    });
+
+    const testSchema = new mongoose.Schema(
+      {
+        name: String,
+        sub: { type: subSchema, default: () => ({}) }
+      }
+    );
+
+    const Test = db.model('Test', testSchema);
+
+    await Test.collection.insertOne({ name: 'test', sub: { propertyA: 'foo' } });
+    assert.strictEqual(called, 0);
+
+    const doc = await Test.findOne({ name: 'test' });
+    assert.strictEqual(doc.sub.propertyB, 'foo');
+    assert.strictEqual(called, 1);
+  });
+
+  it('applies defaults to pushed subdocs after initing document (gh-12515)', async function() {
+    const animalSchema = new Schema({ title: String });
+    const animalsSchema = new Schema({
+      species: [animalSchema],
+      totalAnimals: Number
+    });
+    const Userschema = new Schema({
+      animals: animalsSchema
+    });
+    const UserModel = db.model('User', Userschema);
+
+    const doc = new UserModel();
+    doc.animals = { totalAnimals: 1 };
+    doc.animals.species = [{ title: 'Lion' }];
+    await doc.save();
+    // once created we fetch it again
+    let user = await UserModel.findById(doc._id);
+
+    // add new animal
+    user.animals.species.push({ title: 'Elephant' });
+    await user.save();
+    assert.ok(user.animals.species[0]._id);
+    assert.ok(user.animals.species[1]._id);
+    user = await UserModel.collection.findOne({ _id: user._id });
+
+    assert.ok(user.animals.species[0]._id);
+    assert.ok(user.animals.species[1]._id);
+  });
+
+  it('If the field does not exist, $inc should create it and set is value to the specified one (gh-12435)', async function() {
+    const schema = new mongoose.Schema({
+      name: String,
+      count: Number
+    });
+    const Model = db.model('IncTest', schema);
+    const doc = new Model({ name: 'Test' });
+    await doc.save();
+    doc.$inc('count', 1);
+    await doc.save();
+
+    assert.strictEqual(doc.count, 1);
+
+    const addedDoc = await Model.findOne({ name: 'Test' });
+    assert.strictEqual(addedDoc.count, 1);
+  });
+
+  it('avoids overwriting array if saving with no changes with array deselected (gh-12414)', async function() {
+    const schema = new mongoose.Schema({
+      name: String,
+      tags: [String]
+    });
+    const Test = db.model('Test', schema);
+
+    const { _id } = await Test.create({ name: 'Mongoose', tags: ['mongodb'] });
+
+    const doc = await Test.findById(_id).select('name');
+    assert.deepStrictEqual(doc.getChanges(), {});
+    await doc.save();
+
+    const rawDoc = await Test.collection.findOne({ _id });
+    assert.ok(rawDoc);
+    assert.deepStrictEqual(rawDoc.tags, ['mongodb']);
+  });
+
+  it('$clone() (gh-11849)', async function() {
+    const schema = new mongoose.Schema({
+      name: {
+        type: String,
+        validate: {
+          validator: (v) => v !== 'Invalid'
+        }
+      }
+    });
+    const Test = db.model('Test', schema);
+
+    const item = await Test.create({ name: 'Test' });
+
+    const doc = await Test.findById(item._id);
+    const clonedDoc = doc.$clone();
+
+    assert.deepEqual(clonedDoc, doc);
+    assert.deepEqual(clonedDoc._doc, doc._doc);
+    assert.deepEqual(clonedDoc.$__, doc.$__);
+
+    // Editing a field in the cloned doc does not effect
+    // the original doc
+    clonedDoc.name = 'Test 2';
+    assert.equal(doc.name, 'Test');
+    assert.equal(clonedDoc.name, 'Test 2');
+    assert.ok(!doc.$isModified('name'));
+    assert.ok(clonedDoc.$isModified('name'));
+
+    // Saving the cloned doc does not effect `modifiedPaths`
+    // in the original doc
+    const modifiedPaths = [...doc.modifiedPaths()];
+    await clonedDoc.save();
+    assert.deepEqual(doc.modifiedPaths(), modifiedPaths);
+
+    // Cloning a doc with invalid field preserve the
+    // invalid field value
+    doc.name = 'Invalid';
+    await assert.rejects(async() => {
+      await doc.validate();
+    });
+
+    await clonedDoc.validate();
+
+    const invalidClonedDoc = doc.$clone();
+    doc.name = 'Test';
+    await doc.validate();
+    await assert.rejects(async() => {
+      await invalidClonedDoc.validate();
+    });
+
+    // Setting a session on the cloned doc does not
+    // affect the session in the original doc
+    const session = await Test.startSession();
+    clonedDoc.$session(session);
+    assert.strictEqual(doc.$session(), null);
+    assert.strictEqual(clonedDoc.$session(), session);
+  });
+
+  it('can create document with document array and top-level key named `schema` (gh-12480)', async function() {
+    const AuthorSchema = new Schema({
+      fullName: { type: 'String', required: true }
+    });
+
+    const BookSchema = new Schema({
+      schema: { type: 'String', required: true },
+      title: { type: 'String', required: true },
+      authors: [AuthorSchema]
+    }, { supressReservedKeysWarning: true });
+
+    const Book = db.model('Book', BookSchema);
+
+    await Book.create({
+      schema: 'design',
+      authors: [{ fullName: 'Sourabh Bagrecha' }],
+      title: 'The power of JavaScript'
+    });
+  });
+
+  it('handles setting array to itself after saving and pushing a new value (gh-12656)', async function() {
+    const Test = db.model('Test', new Schema({
+      list: [{
+        a: Number
+      }]
+    }));
+    await Test.create({ list: [{ a: 1, b: 11 }] });
+
+    let doc = await Test.findOne();
+    doc.list.push({ a: 2 });
+    doc.list = [...doc.list];
+    await doc.save();
+
+    doc.list.push({ a: 3 });
+    doc.list = [...doc.list];
+    await doc.save();
+
+    doc = await Test.findOne();
+    assert.equal(doc.list.length, 3);
+    assert.deepStrictEqual(doc.list.map(el => el.a), [1, 2, 3]);
+  });
+
+  it('should not trigger isModified when setting a nested boolean to the same value as previously  (gh-12992)', async function() {
+    const Test = db.model('Test', new Schema({
+      result: new Schema(
+        {
+          score: Number,
+          passed: Boolean
+        },
+        { _id: false }
+      )
+    }));
+    const newTest = await Test.create({
+      result: {
+        score: 40,
+        passed: false
+      }
+    });
+
+    const existingTest = await Test.findById(newTest._id);
+    existingTest.result = {
+      score: 40,
+      passed: false
+    };
+
+    assert.equal(existingTest.isModified(), false);
+    assert.equal(existingTest.modifiedPaths().length, 0);
+
+    existingTest.result = {
+      score: 40,
+      passed: true
+    };
+
+    assert.equal(existingTest.isModified(), true);
+    assert.equal(existingTest.modifiedPaths().length, 1);
+  });
+
+  it('saves single nested subdoc defaults (gh-12905)', async function() {
+    const nestedSchema = new mongoose.Schema({
+      refOriginal: String,
+      refAnother: {
+        type: String,
+        default: () => 'goodbye'
+      }
+    });
+    const testSchema = new mongoose.Schema({
+      original: String,
+      another: {
+        type: String,
+        default: 'hello'
+      },
+      referenced: {
+        type: nestedSchema,
+        default: () => ({})
+      }
+    });
+    const Test = db.model('Test', testSchema);
+
+    const _id = new mongoose.Types.ObjectId();
+    await Test.collection.insertOne({
+      _id,
+      original: 'foo',
+      referenced: { refOriginal: 'hello' }
+    });
+
+    const doc = await Test.findById(_id);
+    assert.equal(doc.referenced.refOriginal, 'hello');
+    assert.equal(doc.referenced.refAnother, 'goodbye');
+
+    await doc.save();
+    const rawDoc = await Test.findById(_id).lean();
+    assert.equal(rawDoc.referenced.refOriginal, 'hello');
+    assert.equal(rawDoc.referenced.refAnother, 'goodbye');
+  });
+
+  it('$shift() triggers $pop', function() {
+    const Test = db.model('Test', mongoose.Schema({
+      arr: [String]
+    }, { autoCreate: false, autoIndex: false }));
+
+    const doc = Test.hydrate({ arr: ['a', 'b', 'c'] });
+    doc.arr.$shift();
+
+    assert.deepStrictEqual(
+      doc.getChanges(),
+      { $pop: { arr: -1 }, $inc: { __v: 1 } }
+    );
+  });
+
+  it('avoids setting array default if document array projected out by sibling projection (gh-13003)', async function() {
+    const schema = new mongoose.Schema({
+      name: String,
+      arr: [String],
+      properties: {
+        foo: String,
+        bar: [{ baz: String, qux: Boolean }],
+        baz: String
+      }
+    });
+    const Test = db.model('Test', schema);
+
+    const doc = new Test({}, { 'properties.foo': 1 });
+    doc.init({ properties: { foo: 'foo' } });
+    assert.strictEqual(doc.properties.bar, undefined);
+  });
+
+  it('avoids overwriting array with sibling projection (gh-13043)', async function() {
+    const testSchema = new mongoose.Schema({
+      str: 'string',
+      obj: {
+        subObj: {
+          str: 'string'
+        },
+        subArr: [{
+          str: 'string'
+        }]
+      },
+      arr: [{
+        str: 'string'
+      }]
+    });
+    const Test = db.model('Test', testSchema);
+    // Create one test document : obj.subArr[0].str === 'subArr.test1'
+    await Test.create({
+      str: 'test1',
+      obj: {
+        subObj: {
+          str: 'subObj.test1'
+        },
+        subArr: [{
+          str: 'subArr.test1'
+        }]
+      },
+      arr: [{ str: 'arr.test1' }]
+    });
+
+    const test = await Test.findOne({ str: 'test1' }, 'str obj.subObj');
+
+    // Update one property
+    test.str = test.str + ' - updated';
+    await test.save();
+
+    const fromDb = await Test.findById(test);
+    assert.equal(fromDb.obj.subArr.length, 1);
+    assert.equal(fromDb.obj.subArr[0].str, 'subArr.test1');
+  });
+
+  it('avoids prototype pollution on init', async function() {
+    const Example = db.model('Example', new Schema({ hello: String }));
+
+    const example = await new Example({ hello: 'world!' }).save();
+    await Example.findByIdAndUpdate(example._id, {
+      $rename: {
+        hello: '__proto__.polluted'
+      }
+    });
+
+    // this is what causes the pollution
+    await Example.find();
+
+    const test = {};
+    assert.strictEqual(test.polluted, undefined);
+    assert.strictEqual(Object.prototype.polluted, undefined);
+  });
+
+  it('sets defaults on subdocs with subdoc projection (gh-13720)', async function() {
+    const subSchema = new mongoose.Schema({
+      propertyA: { type: String, default: 'A' },
+      propertyB: { type: String, default: 'B' }
+    });
+    const userSchema = new mongoose.Schema({
+      name: String,
+      sub: { type: subSchema, default: () => ({}) }
+    });
+    const User = db.model('User', userSchema);
+    await User.insertMany([{ name: 'user' }]);
+    await User.updateMany({}, { $unset: { 'sub.propertyA': '' } });
+    const nestedProjectionDoc = await User.findOne({}, { name: 1, 'sub.propertyA': 1, 'sub.propertyB': 1 });
+    assert.strictEqual(nestedProjectionDoc.sub.propertyA, 'A');
+  });
+
+  it('avoids adding nested paths to markModified() output if adding a new field (gh-14024)', async function() {
+    const eventSchema = new Schema({
+      name: { type: String },
+      __stateBeforeSuspension: {
+        field1: { type: String },
+        field2: { type: String },
+        jsonField: {
+          name: { type: String },
+          name1: { type: String }
+        }
+      }
+    });
+    const Event = db.model('Event', eventSchema);
+    const eventObj = new Event({ name: 'event object', __stateBeforeSuspension: { field1: 'test', jsonField: { name: 'test3' } } });
+    await eventObj.save();
+    const newObject = { field1: 'test', jsonField: { name: 'test3', name1: 'test4' } };
+    eventObj.set('__stateBeforeSuspension', newObject);
+    assert.deepEqual(
+      eventObj.modifiedPaths(),
+      ['__stateBeforeSuspension', '__stateBeforeSuspension.jsonField']
+    );
+  });
+
+  it('should allow null values in list in self assignment (gh-14172) (gh-13859)', async function() {
+    const objSchema = new Schema({
+      date: Date,
+      value: Number
+    });
+
+    const testSchema = new Schema({
+      intArray: [Number],
+      strArray: [String],
+      objArray: [objSchema]
+    });
+    const Test = db.model('Test', testSchema);
+
+    const doc = new Test({
+      intArray: [1, 2, 3, null],
+      strArray: ['b', null, 'c'],
+      objArray: [
+        { date: new Date(1000), value: 1 },
+        null,
+        { date: new Date(3000), value: 3 }
+      ]
+    });
+    await doc.save();
+    doc.intArray = doc.intArray;
+    doc.strArray = doc.strArray;
+    doc.objArray = doc.objArray; // this is the trigger for the error
+    assert.ok(doc);
+    await doc.save();
+    assert.ok(doc);
+  });
+
+  it('avoids overwriting dotted paths in mixed path underneath nested path (gh-14178)', async function() {
+    const testSchema = new Schema({
+      __stateBeforeSuspension: {
+        field1: String,
+        field3: { type: Schema.Types.Mixed }
+      }
+    });
+    const Test = db.model('Test', testSchema);
+    const eventObj = new Test({
+      __stateBeforeSuspension: { field1: 'test' }
+    });
+    await eventObj.save();
+    const newO = eventObj.toObject();
+    newO.__stateBeforeSuspension.field3 = { '.ippo': 5 };
+    eventObj.set(newO);
+    await eventObj.save();
+
+    assert.strictEqual(eventObj.__stateBeforeSuspension.field3['.ippo'], 5);
+
+    const fromDb = await Test.findById(eventObj._id).lean().orFail();
+    assert.strictEqual(fromDb.__stateBeforeSuspension.field3['.ippo'], 5);
+  });
+
+  it('handles setting nested path to null (gh-14205)', function() {
+    const schema = new mongoose.Schema({
+      nested: {
+        key1: String,
+        key2: String
+      }
+    });
+
+    const Model = db.model('Test', schema);
+
+    const doc = new Model();
+    doc.init({
+      nested: { key1: 'foo', key2: 'bar' }
+    });
+
+    doc.set({ nested: null });
+    assert.strictEqual(doc.toObject().nested, null);
+  });
+
+  it('handles setting nested path to undefined (gh-14205)', function() {
+    const schema = new mongoose.Schema({
+      nested: {
+        key1: String,
+        key2: String
+      }
+    });
+
+    const Model = db.model('Test', schema);
+
+    const doc = new Model();
+    doc.init({
+      nested: { key1: 'foo', key2: 'bar' }
+    });
+
+    doc.set({ nested: void 0 });
+    assert.strictEqual(doc.toObject().nested, void 0);
+  });
+
+  it('avoids depopulating populated subdocs underneath document arrays when copying to another document (gh-14418)', async function() {
+    const cartSchema = new mongoose.Schema({
+      products: [
+        {
+          product: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Product'
+          },
+          quantity: Number
+        }
+      ],
+      singleProduct: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product'
+      }
+    });
+    const purchaseSchema = new mongoose.Schema({
+      products: [
+        {
+          product: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Product'
+          },
+          quantity: Number
+        }
+      ],
+      singleProduct: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product'
+      }
+    });
+    const productSchema = new mongoose.Schema({
+      name: String
+    });
+
+    const Cart = db.model('Cart', cartSchema);
+    const Purchase = db.model('Purchase', purchaseSchema);
+    const Product = db.model('Product', productSchema);
+
+    const dbProduct = await Product.create({ name: 'Bug' });
+
+    const dbCart = await Cart.create({
+      products: [
+        {
+          product: dbProduct,
+          quantity: 2
+        }
+      ],
+      singleProduct: dbProduct
+    });
+
+    const foundCart = await Cart.findById(dbCart._id).
+      populate('products.product singleProduct');
+
+    const purchaseFromDbCart = new Purchase({
+      products: foundCart.products,
+      singleProduct: foundCart.singleProduct
+    });
+    assert.equal(purchaseFromDbCart.products[0].product.name, 'Bug');
+    assert.equal(purchaseFromDbCart.singleProduct.name, 'Bug');
+  });
+
+  it('handles virtuals that are stored as objects but getter returns string with toJSON (gh-14446)', async function() {
+    const childSchema = new mongoose.Schema();
+
+    childSchema.virtual('name')
+      .set(function(values) {
+        for (const [lang, val] of Object.entries(values)) {
+          this.set(`name.${lang}`, val);
+        }
+      })
+      .get(function() {
+        return this.$__getValue(`name.${this.lang}`);
+      });
+
+    childSchema.add({ name: { en: { type: String }, de: { type: String } } });
+
+    const ChildModel = db.model('Child', childSchema);
+    const ParentModel = db.model('Parent', new mongoose.Schema({
+      children: [childSchema]
+    }));
+
+    const child = await ChildModel.create({ name: { en: 'Stephen', de: 'Stefan' } });
+    child.lang = 'en';
+    assert.equal(child.name, 'Stephen');
+
+    const parent = await ParentModel.create({
+      children: [{ name: { en: 'Stephen', de: 'Stefan' } }]
+    });
+    parent.children[0].lang = 'de';
+    const obj = parent.toJSON({ getters: true });
+    assert.equal(obj.children[0].name, 'Stefan');
+  });
+});
+
+describe('Check if instance function that is supplied in schema option is availabe', function() {
+  it('should give an instance function back rather than undefined', function ModelJS() {
+    const testSchema = new mongoose.Schema({}, { methods: { instanceFn() { return 'Returned from DocumentInstanceFn'; } } });
+    const TestModel = mongoose.model('TestModel', testSchema);
+    const TestDocument = new TestModel({});
+    assert.equal(TestDocument.instanceFn(), 'Returned from DocumentInstanceFn');
   });
 });

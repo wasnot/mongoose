@@ -9,29 +9,12 @@ const start = require('./common');
 const Promise = require('bluebird');
 const Q = require('q');
 const assert = require('assert');
+const sinon = require('sinon');
 const mongodb = require('mongodb');
 const MongooseError = require('../lib/error/index');
 
-const Server = require('./connection_server');
-const server = new Server('mongod', {
-  bind_ip: '127.0.0.1',
-  port: 27000,
-  dbpath: './data/db/27000'
-});
-
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
-
-const uri = 'mongodb://localhost:27017/mongoose_test';
-
-before(function() {
-  return server.purge();
-});
-
-after(function() {
-  this.timeout(15000);
-  return server.stop();
-});
 
 /**
  * Test.
@@ -42,7 +25,7 @@ describe('connections:', function() {
 
   describe('openUri (gh-5304)', function() {
     it('with mongoose.createConnection()', function() {
-      const conn = mongoose.createConnection('mongodb://localhost/mongoosetest');
+      const conn = mongoose.createConnection(start.uri.slice(0, start.uri.lastIndexOf('/')) + '/' + start.databases[0]);
       assert.equal(conn.constructor.name, 'NativeConnection');
 
       const Test = conn.model('Test', new Schema({ name: String }));
@@ -53,9 +36,12 @@ describe('connections:', function() {
       return conn.asPromise().
         then(function(conn) {
           assert.equal(conn.constructor.name, 'NativeConnection');
-          assert.equal(conn.host, 'localhost');
-          assert.equal(conn.port, 27017);
-          assert.equal(conn.name, 'mongoosetest');
+          // the regex below extract the first ip & port, because the created connection's properties only have the first anyway as "host" and "port"
+          const match = /mongodb:\/\/([\d.]+)(?::(\d+))?(?:,[\d.]+(?::\d+)?)*\/(\w+)/i.exec(start.uri);
+          assert.ok(match);
+          assert.equal(conn.host, match[1]);
+          assert.equal(conn.port, parseInt(match[2]));
+          assert.equal(conn.name, start.databases[0]);
 
           return findPromise;
         }).
@@ -65,15 +51,16 @@ describe('connections:', function() {
     });
 
     it('with autoIndex (gh-5423)', async function() {
-      const conn = await mongoose.createConnection('mongodb://localhost:27017/mongoosetest', {
+      const conn = await mongoose.createConnection(start.uri, {
         autoIndex: false
       }).asPromise();
 
       assert.strictEqual(conn.config.autoIndex, false);
+      await conn.close();
     });
 
     it('with autoCreate (gh-6489)', async function() {
-      const conn = await mongoose.createConnection(uri, {
+      const conn = await mongoose.createConnection(start.uri, {
         // autoCreate: true
       }).asPromise();
 
@@ -94,10 +81,11 @@ describe('connections:', function() {
       const res = await conn.collection('gh6489_Conn').
         find({}).sort({ name: 1 }).toArray();
       assert.deepEqual(res.map(v => v.name), ['alpha', 'Zeta']);
+      await conn.close();
     });
 
     it('with autoCreate = false (gh-8814)', async function() {
-      const conn = await mongoose.createConnection(uri, {
+      const conn = await mongoose.createConnection(start.uri, {
         autoCreate: false
       }).asPromise();
 
@@ -109,10 +97,11 @@ describe('connections:', function() {
 
       const res = await conn.db.listCollections().toArray();
       assert.ok(!res.map(c => c.name).includes('gh8814_Conn'));
+      await conn.close();
     });
 
     it('autoCreate when collection already exists does not fail (gh-7122)', async function() {
-      const conn = await mongoose.createConnection(uri).asPromise();
+      const conn = await mongoose.createConnection(start.uri).asPromise();
 
       const schema = new mongoose.Schema({
         name: {
@@ -122,11 +111,12 @@ describe('connections:', function() {
       }, { autoCreate: true });
 
       await conn.model('Actor', schema).init();
+      await conn.close();
     });
 
     it('throws helpful error with legacy syntax (gh-6756)', function() {
       assert.throws(function() {
-        mongoose.createConnection('localhost', 'dbname', 27017);
+        mongoose.createConnection('127.0.0.1', 'dbname', 27017);
       }, /mongoosejs\.com.*connections\.html/);
     });
 
@@ -139,7 +129,7 @@ describe('connections:', function() {
     it('resolving with q (gh-5714)', async function() {
       const bootMongo = Q.defer();
 
-      const conn = mongoose.createConnection('mongodb://localhost:27017/mongoosetest');
+      const conn = mongoose.createConnection(start.uri);
 
       conn.on('connected', function() {
         bootMongo.resolve(this);
@@ -147,11 +137,12 @@ describe('connections:', function() {
 
       const _conn = await bootMongo.promise;
       assert.equal(_conn, conn);
+      await conn.close();
     });
 
-    it('connection plugins (gh-7378)', function() {
-      const conn1 = mongoose.createConnection('mongodb://localhost:27017/mongoosetest');
-      const conn2 = mongoose.createConnection('mongodb://localhost:27017/mongoosetest');
+    it('connection plugins (gh-7378)', async function() {
+      const conn1 = mongoose.createConnection(start.uri);
+      const conn2 = mongoose.createConnection(start.uri);
 
       const called = [];
       conn1.plugin(schema => called.push(schema));
@@ -163,6 +154,8 @@ describe('connections:', function() {
       conn1.model('Test', schema);
       assert.equal(called.length, 1);
       assert.equal(called[0], schema);
+      await conn1.close();
+      await conn2.close();
     });
   });
 
@@ -170,7 +163,7 @@ describe('connections:', function() {
     let conn;
 
     before(function() {
-      conn = mongoose.createConnection('mongodb://localhost:27017/mongoosetest_2');
+      conn = mongoose.createConnection(start.uri2);
       return conn;
     });
 
@@ -285,6 +278,7 @@ describe('connections:', function() {
     });
 
     it('allows passing a schema', function() {
+      mongoose.deleteModel(/Test/);
       const MyModel = mongoose.model('Test', new Schema({
         name: String
       }));
@@ -305,16 +299,16 @@ describe('connections:', function() {
 
     it('prevents overwriting pre-existing models', function() {
       db.deleteModel(/Test/);
-      db.model('Test', new Schema);
+      db.model('Test', new Schema());
 
       assert.throws(function() {
-        db.model('Test', new Schema);
+        db.model('Test', new Schema());
       }, /Cannot overwrite `Test` model/);
     });
 
     it('allows passing identical name + schema args', function() {
       const name = 'Test';
-      const schema = new Schema;
+      const schema = new Schema();
 
       db.deleteModel(/Test/);
       const model = db.model(name, schema);
@@ -362,7 +356,7 @@ describe('connections:', function() {
 
   it('force close (gh-5664)', function(done) {
     const opts = {};
-    const db = mongoose.createConnection('mongodb://localhost:27017/test', opts);
+    const db = mongoose.createConnection(start.uri, opts);
     const coll = db.collection('Test');
     db.asPromise().then(function() {
       setTimeout(function() {
@@ -377,9 +371,69 @@ describe('connections:', function() {
     });
   });
 
+  it('destroy connection and remove it permanantly', (done) => {
+    const opts = {};
+    const conn = mongoose.createConnection(start.uri, opts);
+    const MongoClient = mongodb.MongoClient;
+    const stub = sinon.stub(MongoClient.prototype, 'close').callsFake((force, callback) => {
+      callback();
+    });
+
+    conn.useDb('test-db');
+
+    const totalConn = mongoose.connections.length;
+
+    conn.destroy(() => {
+      assert.equal(mongoose.connections.length, totalConn - 1);
+      stub.restore();
+      done();
+    });
+  });
+
+  it('verify that attempt to re-open destroyed connection throws error, via promise', (done) => {
+    const opts = {};
+    const conn = mongoose.createConnection(start.uri, opts);
+    const MongoClient = mongodb.MongoClient;
+    const stub = sinon.stub(MongoClient.prototype, 'close').callsFake((force, callback) => {
+      callback();
+    });
+
+    conn.useDb('test-db');
+
+    conn.destroy(async() => {
+      try {
+        await conn.openUri(start.uri);
+      } catch (error) {
+        assert.equal(error.message, 'Connection has been closed and destroyed, and cannot be used for re-opening the connection. Please create a new connection with `mongoose.createConnection()` or `mongoose.connect()`.');
+        stub.restore();
+        done();
+      }
+    });
+  });
+
+  it('verify that attempt to re-open destroyed connection throws error, via callback', (done) => {
+    const opts = {};
+    const conn = mongoose.createConnection(start.uri, opts);
+    const MongoClient = mongodb.MongoClient;
+    const stub = sinon.stub(MongoClient.prototype, 'close').callsFake((force, callback) => {
+      callback();
+    });
+
+    conn.useDb('test-db');
+
+    conn.destroy(() => {
+      conn.openUri(start.uri, function(error, result) {
+        assert.equal(result, undefined);
+        assert.equal(error, 'Connection has been closed and destroyed, and cannot be used for re-opening the connection. Please create a new connection with `mongoose.createConnection()` or `mongoose.connect()`.');
+        stub.restore();
+        done();
+      });
+    });
+  });
+
   it('force close with connection created after close (gh-5664)', function(done) {
     const opts = {};
-    const db = mongoose.createConnection('mongodb://localhost:27017/test', opts);
+    const db = mongoose.createConnection(start.uri, opts);
     db.asPromise().then(function() {
       setTimeout(function() {
         let threw = false;
@@ -401,27 +455,27 @@ describe('connections:', function() {
 
   it('bufferCommands (gh-5720)', function() {
     let opts = { bufferCommands: false };
-    let db = mongoose.createConnection('mongodb://localhost:27017/test', opts);
+    let db = mongoose.createConnection(start.uri, opts);
 
     let M = db.model('gh5720', new Schema({}));
     assert.ok(!M.collection._shouldBufferCommands());
     db.close();
 
     opts = { bufferCommands: true };
-    db = mongoose.createConnection('mongodb://localhost:27017/test', opts);
+    db = mongoose.createConnection(start.uri, opts);
     M = db.model('gh5720', new Schema({}, { bufferCommands: false }));
     assert.ok(!M.collection._shouldBufferCommands());
     db.close();
 
     opts = { bufferCommands: true };
-    db = mongoose.createConnection('mongodb://localhost:27017/test', opts);
+    db = mongoose.createConnection(start.uri, opts);
     M = db.model('gh5720', new Schema({}));
     assert.ok(M.collection._shouldBufferCommands());
 
     db = mongoose.createConnection();
     M = db.model('gh5720', new Schema({}));
     opts = { bufferCommands: false };
-    db.openUri('mongodb://localhost:27017/test', opts);
+    db.openUri(start.uri, opts);
     assert.ok(!M.collection._shouldBufferCommands());
 
     return M.findOne().then(() => assert.ok(false), err => assert.ok(err.message.includes('initial connection'))).
@@ -431,7 +485,7 @@ describe('connections:', function() {
   it('dbName option (gh-6106)', function() {
     const opts = { dbName: 'bacon' };
     return mongoose.
-      createConnection('mongodb://localhost:27017/test', opts).
+      createConnection(start.uri, opts).
       asPromise().
       then(db => {
         assert.equal(db.name, 'bacon');
@@ -440,7 +494,7 @@ describe('connections:', function() {
   });
 
   it('uses default database in uri if options.dbName is not provided', function() {
-    return mongoose.createConnection('mongodb://localhost:27017/default-db-name').
+    return mongoose.createConnection(start.uri.slice(0, start.uri.lastIndexOf('/')) + '/default-db-name').
       asPromise().
       then(db => {
         assert.equal(db.name, 'default-db-name');
@@ -449,7 +503,7 @@ describe('connections:', function() {
   });
 
   it('startSession() (gh-6653)', function() {
-    const conn = mongoose.createConnection('mongodb://localhost:27017/test');
+    const conn = mongoose.createConnection(start.uri);
 
     let lastUse;
     let session;
@@ -464,13 +518,13 @@ describe('connections:', function() {
       }).
       then(() => {
         assert.ok(session.serverSession.lastUse > lastUse);
-        conn.close();
+        return conn.close();
       });
   });
 
   describe('modelNames()', function() {
     it('returns names of all models registered on it', async function() {
-      const m = new mongoose.Mongoose;
+      const m = new mongoose.Mongoose();
       m.model('root', { x: String });
       const another = m.model('another', { x: String });
       another.discriminator('discriminated', new Schema({ x: String }));
@@ -496,7 +550,7 @@ describe('connections:', function() {
 
   describe('connection pool sharing: ', function() {
     it('works', async function() {
-      const db = mongoose.createConnection('mongodb://localhost:27017/mongoose1');
+      const db = mongoose.createConnection(start.uri);
 
       const db2 = db.useDb('mongoose2');
 
@@ -516,7 +570,7 @@ describe('connections:', function() {
 
     it('saves correctly', async function() {
       const db = start();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
 
       const schema = new Schema({
         body: String,
@@ -546,12 +600,13 @@ describe('connections:', function() {
       const nothing2 = await m2.findById(i1.id);
       assert.strictEqual(null, nothing2);
 
+      await db.close();
       await db2.close();
     });
 
     it('emits connecting events on both', async function() {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
 
       db2.on('connecting', async function() {
@@ -573,7 +628,7 @@ describe('connections:', function() {
 
     it('emits connected events on both', function() {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
 
       db2.on('connected', function() {
@@ -594,7 +649,7 @@ describe('connections:', function() {
 
     it('emits open events on both', function() {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
       db2.on('open', function() {
         hit && close();
@@ -614,7 +669,7 @@ describe('connections:', function() {
 
     it('emits disconnecting events on both, closing initial db', function(done) {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
       db2.on('disconnecting', function() {
         hit && done();
@@ -632,7 +687,7 @@ describe('connections:', function() {
 
     it('emits disconnecting events on both, closing secondary db', function(done) {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
       db2.on('disconnecting', function() {
         hit && done();
@@ -650,7 +705,7 @@ describe('connections:', function() {
 
     it('emits disconnected events on both, closing initial db', function(done) {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
       db2.on('disconnected', function() {
         hit && done();
@@ -668,7 +723,7 @@ describe('connections:', function() {
 
     it('emits disconnected events on both, closing secondary db', function(done) {
       const db = mongoose.createConnection();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
       let hit = false;
       db2.on('disconnected', function() {
         hit && done();
@@ -684,19 +739,33 @@ describe('connections:', function() {
       db.openUri(start.uri);
     });
 
-    it('closes correctly for all dbs, closing initial db', function(done) {
-      const db = start();
-      const db2 = db.useDb('mongoose-test-2');
+    it('closes correctly for all dbs, closing initial db', async function() {
+      const db = await start({ noErrorListener: true }).asPromise();
+      const db2 = db.useDb(start.databases[1]);
 
-      db2.on('close', function() {
-        done();
+      const p = new Promise(resolve => {
+        db2.on('close', function() {
+          resolve();
+        });
       });
-      db.close();
+      await db.close();
+      await p;
+    });
+
+    it('handles re-opening base connection (gh-11240)', async function() {
+      const db = await start().asPromise();
+      const db2 = db.useDb(start.databases[1]);
+
+      await db.close();
+
+      await db.openUri(start.uri);
+      assert.strictEqual(db.client, db2.client);
+      await db.close();
     });
 
     it('closes correctly for all dbs, closing secondary db', function(done) {
       const db = start();
-      const db2 = db.useDb('mongoose-test-2');
+      const db2 = db.useDb(start.databases[1]);
 
       db.on('disconnected', function() {
         done();
@@ -706,11 +775,11 @@ describe('connections:', function() {
 
     it('cache connections to the same db', function() {
       const db = start();
-      const db2 = db.useDb('mongoose-test-2', { useCache: true });
-      const db3 = db.useDb('mongoose-test-2', { useCache: true });
+      const db2 = db.useDb(start.databases[1], { useCache: true });
+      const db3 = db.useDb(start.databases[1], { useCache: true });
 
       assert.strictEqual(db2, db3);
-      db.close();
+      return db.close();
     });
   });
 
@@ -718,16 +787,16 @@ describe('connections:', function() {
     describe('when using standard authentication', function() {
       describe('when username and password are undefined', function() {
         it('should return false', function() {
-          const db = mongoose.createConnection('mongodb://localhost:27017/fake', {});
+          const db = mongoose.createConnection(start.uri, {});
 
           assert.equal(db.shouldAuthenticate(), false);
 
-          db.close();
+          return db.close();
         });
       });
       describe('when username and password are empty strings', function() {
         it('should return false', function() {
-          const db = mongoose.createConnection('mongodb://localhost:27017/fake', {
+          const db = mongoose.createConnection(start.uri, {
             user: '',
             pass: ''
           });
@@ -735,12 +804,12 @@ describe('connections:', function() {
 
           assert.equal(db.shouldAuthenticate(), false);
 
-          db.close();
+          return db.close();
         });
       });
       describe('when both username and password are defined', function() {
         it('should return true', function() {
-          const db = mongoose.createConnection('mongodb://localhost:27017/fake', {
+          const db = mongoose.createConnection(start.uri, {
             user: 'user',
             pass: 'pass'
           });
@@ -748,37 +817,37 @@ describe('connections:', function() {
 
           assert.equal(db.shouldAuthenticate(), true);
 
-          db.close();
+          db.close(); // does not actually do anything
         });
       });
     });
     describe('when using MONGODB-X509 authentication', function() {
       describe('when username and password are undefined', function() {
         it('should return false', function() {
-          const db = mongoose.createConnection('mongodb://localhost:27017/fake', {});
+          const db = mongoose.createConnection(start.uri, {});
           db.on('error', function() {
           });
 
           assert.equal(db.shouldAuthenticate(), false);
 
-          db.close();
+          return db.close();
         });
       });
       describe('when only username is defined', function() {
         it('should return false', function() {
-          const db = mongoose.createConnection('mongodb://localhost:27017/fake', {
+          const db = mongoose.createConnection(start.uri, {
             user: 'user',
             auth: { authMechanism: 'MONGODB-X509' }
           });
           db.asPromise().catch(() => {});
           assert.equal(db.shouldAuthenticate(), true);
 
-          db.close();
+          db.close(); // does not actually do anything
         });
       });
       describe('when both username and password are defined', function() {
         it('should return false', function() {
-          const db = mongoose.createConnection('mongodb://localhost:27017/fake', {
+          const db = mongoose.createConnection(start.uri, {
             user: 'user',
             pass: 'pass',
             auth: { authMechanism: 'MONGODB-X509' }
@@ -787,24 +856,25 @@ describe('connections:', function() {
 
           assert.equal(db.shouldAuthenticate(), true);
 
-          db.close();
+          db.close(); // does not actually do anything
         });
       });
     });
   });
 
   describe('passing a function into createConnection', function() {
-    it('should store the name of the function (gh-6517)', function() {
-      const conn = mongoose.createConnection('mongodb://localhost:27017/gh6517');
+    it('should store the name of the function (gh-6517)', function(done) {
+      const conn = mongoose.createConnection(start.uri);
       const schema = new Schema({ name: String });
       class Person extends mongoose.Model {}
       conn.model(Person, schema);
       assert.strictEqual(conn.modelNames()[0], 'Person');
+      conn.close(done);
     });
   });
 
-  it('deleteModel()', function() {
-    const conn = mongoose.createConnection('mongodb://localhost:27017/gh6813');
+  it('deleteModel()', async function() {
+    const conn = mongoose.createConnection(start.uri);
 
     let Model = conn.model('gh6813', new Schema({ name: String }));
 
@@ -823,10 +893,11 @@ describe('connections:', function() {
 
     Model = conn.model('gh6813', new Schema({ name: String }));
     assert.ok(Model);
-    return Model.create({ name: 'test' });
+    await Model.create({ name: 'test' });
+    await conn.close();
   });
 
-  it('throws a MongooseServerSelectionError on server selection timeout (gh-8451)', () => {
+  it('throws a MongooseServerSelectionError on server selection timeout (gh-8451)', function() {
     const opts = {
       serverSelectionTimeoutMS: 100
     };
@@ -846,7 +917,7 @@ describe('connections:', function() {
     const opts = {
       replicaSet: process.env.REPLICA_SET
     };
-    const conn = await mongoose.createConnection('mongodb://localhost:27017/gh8425', opts);
+    const conn = await mongoose.createConnection(start.uri, opts);
 
     const Model = conn.model('Test', Schema({ name: String }));
     await Model.create({ name: 'test' });
@@ -866,17 +937,21 @@ describe('connections:', function() {
     await nextChange;
     assert.equal(changes.length, 1);
     assert.equal(changes[0].operationType, 'insert');
+    await conn.close();
   });
 
   it('useDB inherits config from default connection (gh-8267)', async function() {
-    await mongoose.connect('mongodb://localhost:27017/gh8267-0', { sanitizeFilter: true });
+    const m = new mongoose.Mongoose();
+    await m.connect(start.uri, { sanitizeFilter: true });
 
-    const db2 = mongoose.connection.useDb('gh8267-1');
+    const db2 = m.connection.useDb('gh8267-1');
     assert.equal(db2.config.sanitizeFilter, true);
+
+    await m.disconnect();
   });
 
   it('allows setting client on a disconnected connection (gh-9164)', async function() {
-    const client = await mongodb.MongoClient.connect('mongodb://localhost:27017/mongoose_test');
+    const client = await mongodb.MongoClient.connect(start.uri);
     const conn = mongoose.createConnection().setClient(client);
 
     assert.equal(conn.readyState, 1);
@@ -884,12 +959,13 @@ describe('connections:', function() {
     await conn.createCollection('test');
     const res = await conn.dropCollection('test');
     assert.ok(res);
+    await conn.close();
   });
 
   it('connection.asPromise() resolves to a connection instance (gh-9496)', async function() {
-    const m = new mongoose.Mongoose;
+    const m = new mongoose.Mongoose();
 
-    m.connect('mongodb://localhost:27017/test_gh9496');
+    m.connect(start.uri);
     const conn = await m.connection.asPromise();
 
     assert.ok(conn instanceof m.Connection);
@@ -935,28 +1011,11 @@ describe('connections:', function() {
     assert.throws(() => m.model('Test', Schema({ name: String })), /overwrite/);
   });
 
-  it('can use destructured `connect` and `disconnect` (gh-9597)', async function() {
-    const m = new mongoose.Mongoose;
-    const connect = m.connect;
-    const disconnect = m.disconnect;
-
-    await disconnect();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const errorOnConnect = await connect('mongodb://localhost:27017/test_gh9597').then(() => null, err => err);
-    assert.ifError(errorOnConnect);
-
-    const errorOnDisconnect = await disconnect().then(() => null, err => err);
-    assert.ifError(errorOnDisconnect);
-  });
-
   describe('when connecting with a secondary read preference(gh-9374)', function() {
     describe('mongoose.connect', function() {
       it('forces autoIndex & autoCreate to be false if read preference is secondary or secondaryPreferred', async function() {
-        const secondaryURI =
-                    'mongodb://localhost:27017/test_gh9374_1?readPreference=secondary';
         const m = new mongoose.Mongoose();
-        await m.connect(secondaryURI);
+        await m.connect(start.uri, { readPreference: 'secondary' });
 
         assert.strictEqual(m.connection.get('autoIndex'), false);
         assert.strictEqual(m.connection.get('autoCreate'), false);
@@ -968,10 +1027,9 @@ describe('connections:', function() {
       });
 
       it('throws if options try to set autoIndex to true', function() {
-        const secondaryURI =
-                    'mongodb://localhost:27017/test_gh9374_1?readPreference=secondary';
         const opts = {
-          autoIndex: true
+          autoIndex: true,
+          readPreference: 'secondary'
         };
 
         const err = new MongooseError(
@@ -982,13 +1040,12 @@ describe('connections:', function() {
         );
         const m = new mongoose.Mongoose();
 
-        assert.rejects(() => m.connect(secondaryURI, opts), err);
+        assert.rejects(() => m.connect(start.uri, opts), err);
       });
 
       it('throws if options.config.autoIndex is true, even if options.autoIndex is false', function() {
-        const secondaryURI =
-                    'mongodb://localhost:27017/test_gh9374_1?readPreference=secondary';
         const opts = {
+          readPreference: 'secondary',
           autoIndex: false,
           config: {
             autoIndex: true
@@ -1001,32 +1058,36 @@ describe('connections:', function() {
                         'autoCreate, autoIndex'
         );
         const m = new mongoose.Mongoose();
-        assert.rejects(m.connect(secondaryURI, opts), err);
+        assert.rejects(m.connect(start.uri, opts), err);
       });
     });
 
     describe('mongoose.createConnection', function() {
-      it('forces autoIndex & autoCreate to be false if read preference is secondary or secondaryPreferred (gh-9374)', function() {
-        const secondaryURI =
-                    'mongodb://localhost:27017/test_gh9374_1?readPreference=secondary';
-        const secondaryPrefURI =
-                    'mongodb://localhost:27017/test_gh9374_2?readPreference=secondaryPreferred';
-
-        const conn = new mongoose.createConnection(secondaryURI);
+      it('forces autoIndex & autoCreate to be false if read preference is secondary or secondaryPreferred (gh-9374)', async function() {
+        const conn = new mongoose.createConnection(start.uri, { readPreference: 'secondary' });
 
         assert.equal(conn.get('autoIndex'), false);
         assert.equal(conn.get('autoCreate'), false);
 
-        const conn2 = new mongoose.createConnection(secondaryPrefURI);
+        const conn2 = new mongoose.createConnection(start.uri, { readPreference: 'secondaryPreferred' });
 
         assert.equal(conn2.get('autoIndex'), false);
         assert.equal(conn2.get('autoCreate'), false);
+        await conn.close();
+        await conn2.close();
+      });
+
+      it('keeps autoIndex & autoCreate as true by default if read preference is primaryPreferred (gh-9374)', async function() {
+        const conn = new mongoose.createConnection(start.uri, { readPreference: 'primaryPreferred' });
+
+        assert.equal(conn.get('autoIndex'), undefined);
+        assert.equal(conn.get('autoCreate'), undefined);
+        await conn.close();
       });
 
       it('throws if options try to set autoIndex to true', function() {
-        const secondaryURI =
-                    'mongodb://localhost:27017/test_gh9374_1?readPreference=secondary';
         const opts = {
+          readPreference: 'secondary',
           autoIndex: true
         };
         const err = new MongooseError(
@@ -1037,15 +1098,14 @@ describe('connections:', function() {
         );
         const m = new mongoose.Mongoose();
         return assert.throws(
-          () => m.createConnection(secondaryURI, opts),
+          () => m.createConnection(start.uri, opts),
           err
         );
       });
 
       it('throws if options.config.autoIndex is true, even if options.autoIndex is false', function() {
-        const secondaryURI =
-                    'mongodb://localhost:27017/test_gh9374_1?readPreference=secondary';
         const opts = {
+          readPreference: 'secondary',
           autoIndex: false,
           config: {
             autoIndex: true
@@ -1059,7 +1119,7 @@ describe('connections:', function() {
         );
 
         assert.throws(
-          () => mongoose.createConnection(secondaryURI, opts),
+          () => mongoose.createConnection(start.uri, opts),
           err
         );
       });
@@ -1067,9 +1127,9 @@ describe('connections:', function() {
   });
 
   it('Connection id should be scoped per Mongoose Instance (gh-10025)', function() {
-    const m = new mongoose.Mongoose;
+    const m = new mongoose.Mongoose();
     const conn = m.createConnection();
-    const m1 = new mongoose.Mongoose;
+    const m1 = new mongoose.Mongoose();
     const conn2 = m1.createConnection();
     const conn3 = m.createConnection();
     assert.deepStrictEqual(m.connection.id, 0);
@@ -1077,5 +1137,418 @@ describe('connections:', function() {
     assert.deepStrictEqual(m1.connection.id, 0);
     assert.deepStrictEqual(conn2.id, m1.connection.id + 1);
     assert.deepStrictEqual(conn3.id, m.connection.id + 2);
+  });
+
+  describe('Automatic init', function() {
+    it('re-runs init() if connecting after disconnecting (gh-12047)', async function() {
+      const conn = await mongoose.createConnection(start.uri).asPromise();
+
+      const Test = conn.model('Test', new Schema({ name: { type: String, index: true } }));
+      await Test.init();
+
+      let indexes = await Test.collection.listIndexes().toArray();
+      assert.equal(indexes.length, 2);
+      assert.equal(indexes[1].name, 'name_1');
+
+      await conn.db.dropCollection(Test.collection.collectionName);
+
+      const err = await Test.collection.listIndexes().toArray().then(() => null, err => err);
+      assert.ok(err);
+      assert.equal(err.codeName, 'NamespaceNotFound');
+
+      await conn.close();
+
+      await conn.openUri(start.uri);
+      assert.ok(Test.$init);
+      await Test.init();
+
+      indexes = await Test.collection.listIndexes().toArray();
+      assert.equal(indexes.length, 2);
+      assert.equal(indexes[1].name, 'name_1');
+      await conn.close();
+    });
+
+    it('re-runs init() if running setClient() after disconnecting (gh-12047)', async function() {
+      const conn = await mongoose.createConnection(start.uri).asPromise();
+
+      const Test = conn.model('Test', new Schema({ name: { type: String, index: true } }));
+      await Test.init();
+
+      let indexes = await Test.collection.listIndexes().toArray();
+      assert.equal(indexes.length, 2);
+      assert.equal(indexes[1].name, 'name_1');
+
+      await conn.db.dropCollection(Test.collection.collectionName);
+
+      const err = await Test.collection.listIndexes().toArray().then(() => null, err => err);
+      assert.ok(err);
+      assert.equal(err.codeName, 'NamespaceNotFound');
+
+      await conn.close();
+
+      const client = await mongodb.MongoClient.connect(start.uri);
+
+      try {
+        conn.setClient(client);
+        assert.ok(Test.$init);
+        await Test.init();
+
+        indexes = await Test.collection.listIndexes().toArray();
+        assert.equal(indexes.length, 2);
+        assert.equal(indexes[1].name, 'name_1');
+
+        await client.close();
+      } catch (err) {
+        await client.close().catch(() => {});
+
+        throw err;
+      }
+    });
+  });
+
+  describe('Connection#syncIndexes() (gh-10893) (gh-11039)', () => {
+    let connection;
+    let mongooseInstance;
+
+    before(async() => {
+      mongooseInstance = new mongoose.Mongoose();
+      connection = mongooseInstance.createConnection(start.uri);
+    });
+    beforeEach(() => connection.deleteModel(/.*/));
+    afterEach(async() => {
+      await connection.dropDatabase();
+    });
+    after(async() => {
+      await connection.close();
+    });
+
+    it('Allows a syncIndexes option with connection mongoose.connection.syncIndexes (gh-10893)', async function() {
+      const coll = 'tests2';
+
+      let User = connection.model('Test', new Schema({ name: { type: String, index: true } }, { autoIndex: false }), coll);
+      const indexesAfterFirstSync = await connection.syncIndexes();
+      assert.deepEqual(indexesAfterFirstSync, { Test: [] });
+
+      const indexesAfterSecondSync = await User.listIndexes();
+      assert.deepEqual(
+        indexesAfterSecondSync.map(i => i.key),
+        [{ _id: 1 }, { name: 1 }]
+      );
+
+      connection.deleteModel(/Test/);
+
+      User = connection.model('Test', new Schema({
+        otherName: { type: String, index: true }
+      }, { autoIndex: false }), coll);
+
+      const indexesAfterDropping = await connection.syncIndexes();
+      assert.deepEqual(indexesAfterDropping, { Test: ['name_1'] });
+    });
+
+    it('does not sync indexes automatically when `autoIndex: true` (gh-11039)', async function() {
+      // Arrange
+      const buildingSchema = new Schema({ name: String }, { autoIndex: false });
+      buildingSchema.index({ name: 1 });
+      const Building = connection.model('Building', buildingSchema);
+
+      const floorSchema = new Schema({ name: String }, { autoIndex: false });
+      floorSchema.index({ name: 1 }, { unique: true });
+      const Floor = connection.model('Floor', floorSchema);
+
+      const officeSchema = new Schema({ name: String }, { autoIndex: false });
+      const Office = connection.model('Office', officeSchema);
+
+      // ensure all colections exist
+      // otherwise `listIndexes` randomly fails because a collection hasn't been created in the database yt.
+      await Promise.all([
+        Building.createCollection(),
+        Floor.createCollection(),
+        Office.createCollection()
+      ]);
+
+      // Act
+      const [
+        buildingIndexes,
+        floorIndexes,
+        officeIndexes
+      ] = await Promise.all([
+        Building.listIndexes(),
+        Floor.listIndexes(),
+        Office.listIndexes()
+      ]);
+
+      // Assert
+      assert.deepEqual(buildingIndexes.map(index => index.key), [{ _id: 1 }]);
+      assert.deepEqual(floorIndexes.map(index => index.key), [{ _id: 1 }]);
+      assert.deepEqual(officeIndexes.map(index => index.key), [{ _id: 1 }]);
+    });
+
+    it('stops as soon as one model fails with `continueOnError: false` (gh-11039)', async function() {
+      // Arrange
+      const buildingSchema = new Schema({ name: String }, { autoIndex: false });
+      buildingSchema.index({ name: 1 });
+      const Building = connection.model('Building', buildingSchema);
+
+      const floorSchema = new Schema({ name: String }, { autoIndex: false });
+      floorSchema.index({ name: 1 }, { unique: true });
+      const Floor = connection.model('Floor', floorSchema);
+
+      const officeSchema = new Schema({ name: String }, { autoIndex: false });
+      officeSchema.index({ name: 1 });
+      const Office = connection.model('Office', officeSchema);
+      await Floor.insertMany([
+        { name: 'I am a duplicate' },
+        { name: 'I am a duplicate' }
+      ]);
+
+      // Act
+      const err = await connection.syncIndexes().then(() => null, err => err);
+      assert.ok(err);
+
+
+      // Assert
+      const [
+        buildingIndexes,
+        floorIndexes,
+        officeIndexes
+      ] = await Promise.all([
+        Building.listIndexes(),
+        Floor.listIndexes(),
+        Office.listIndexes()
+      ]);
+
+      assert.deepEqual(buildingIndexes.map(index => index.key), [{ _id: 1 }, { name: 1 }]);
+      assert.deepEqual(floorIndexes.map(index => index.key), [{ _id: 1 }]);
+      assert.deepEqual(officeIndexes.map(index => index.key), [{ _id: 1 }]);
+    });
+
+    it('error includes a property with all the errors when `continueOnError: false`', async() => {
+      // Arrange
+      const bookSchema = new Schema({ name: String }, { autoIndex: false });
+      bookSchema.index({ name: 1 }, { unique: true });
+      const Book = connection.model('Book', bookSchema);
+
+
+      await Book.insertMany([
+        { name: 'I am a duplicate' },
+        { name: 'I am a duplicate' }
+      ]);
+
+      // Act
+      const err = await connection.syncIndexes({ continueOnError: false }).then(() => null, err => err);
+
+      // Assert
+      assert.ok(err);
+      assert.ok(err.message.includes('E11000'));
+      assert.equal(err.name, 'SyncIndexesError');
+      assert.equal(err.errors['Book'].code, 11000);
+      assert.equal(err.errors['Book'].code, 11000);
+    });
+
+    it('`continueOnError` is false by default', async() => {
+      // Arrange
+      const bookSchema = new Schema({ name: String }, { autoIndex: false });
+      bookSchema.index({ name: 1 }, { unique: true });
+      const Book = connection.model('Book', bookSchema);
+
+
+      await Book.insertMany([
+        { name: 'I am a duplicate' },
+        { name: 'I am a duplicate' }
+      ]);
+
+      // Act
+      const err = await connection.syncIndexes().then(() => null, err => err);
+
+      // Assert
+      assert.ok(err);
+      assert.ok(err.message.includes('E11000'));
+      assert.equal(err.name, 'SyncIndexesError');
+      assert.equal(err.errors['Book'].code, 11000);
+      assert.equal(err.errors['Book'].code, 11000);
+    });
+
+    it('when `continueOnError: true` it will continue to sync indexes even if one model fails', async() => {
+      // Arrange
+      const buildingSchema = new Schema({ name: String }, { autoIndex: false });
+      buildingSchema.index({ name: 1 });
+      const Building = connection.model('Building', buildingSchema);
+
+      const floorSchema = new Schema({ name: String }, { autoIndex: false });
+      floorSchema.index({ name: 1 }, { unique: true });
+      const Floor = connection.model('Floor', floorSchema);
+
+      const officeSchema = new Schema({ name: String }, { autoIndex: false });
+      officeSchema.index({ name: 1 });
+      const Office = connection.model('Office', officeSchema);
+
+      await Floor.insertMany([
+        { name: 'I am a duplicate' },
+        { name: 'I am a duplicate' }
+      ]);
+
+      // Act
+      await connection.syncIndexes({ continueOnError: true });
+
+      // Assert
+      const [
+        buildingIndexes,
+        floorIndexes,
+        officeIndexes
+      ] = await Promise.all([
+        Building.listIndexes(),
+        Floor.listIndexes(),
+        Office.listIndexes()
+      ]);
+
+      assert.deepEqual(buildingIndexes.map(index => index.key), [{ _id: 1 }, { name: 1 }]);
+      assert.deepEqual(floorIndexes.map(index => index.key), [{ _id: 1 }]);
+      assert.deepEqual(officeIndexes.map(index => index.key), [{ _id: 1 }, { name: 1 }]);
+    });
+
+    it('when `continueOnError: true` it will return a map of modelNames and their sync results/errors', async() => {
+      // Arrange
+      const buildingSchema = new Schema({ name: String }, { autoIndex: false });
+      buildingSchema.index({ name: 1 });
+      connection.model('Building', buildingSchema);
+
+      const floorSchema = new Schema({ name: String }, { autoIndex: false });
+      floorSchema.index({ name: 1 }, { unique: true });
+      const Floor = connection.model('Floor', floorSchema);
+
+      const officeSchema = new Schema({ name: String }, { autoIndex: false });
+      officeSchema.index({ name: 1 });
+      connection.model('Office', officeSchema);
+
+      await Floor.insertMany([
+        { name: 'I am a duplicate' },
+        { name: 'I am a duplicate' }
+      ]);
+
+      // Act
+      const result = await connection.syncIndexes({ continueOnError: true });
+
+      // Assert
+      assert.ok(Array.isArray(result['Building']));
+      assert.ok(result['Floor'].name, 'MongoServerError');
+      assert.ok(Array.isArray(result['Office']));
+    });
+
+    it('mongoose.syncIndexes(...) accepts `continueOnError`', async() => {
+      const m = new mongoose.Mongoose();
+      await m.connect(start.uri);
+
+      // Arrange
+      const buildingSchema = new Schema({ name: String }, { autoIndex: false });
+      buildingSchema.index({ name: 1 });
+      m.model('Building', buildingSchema);
+
+      const floorSchema = new Schema({ name: String }, { autoIndex: false });
+      floorSchema.index({ name: 1 }, { unique: true });
+      const Floor = m.model('Floor', floorSchema);
+
+      const officeSchema = new Schema({ name: String }, { autoIndex: false });
+      officeSchema.index({ name: 1 });
+      m.model('Office', officeSchema);
+
+      await Floor.insertMany([
+        { name: 'I am a duplicate' },
+        { name: 'I am a duplicate' }
+      ]);
+
+      // Act
+      const result = await m.syncIndexes({ continueOnError: true });
+
+      // Assert
+      assert.ok(Array.isArray(result['Building']));
+      assert.ok(result['Floor'].name, 'MongoServerError');
+      assert.ok(Array.isArray(result['Office']));
+
+      await m.disconnect();
+    });
+  });
+
+  it('model() works with 1 argument and overwriteModels set to true (gh-12359)', function() {
+    const m = new mongoose.Mongoose();
+    m.set('overwriteModels', true);
+
+    const Test = m.model('Test', new Schema({ name: String }));
+
+    assert.equal(m.model('Test'), Test);
+
+    const Test2 = m.connection.model('Test2', new Schema({ name: String }));
+
+    assert.equal(m.connection.model('Test2'), Test2);
+  });
+
+  it('creates collection if creating model while connection is disconnected with bufferCommands=false', async function() {
+    const m = new mongoose.Mongoose();
+    m.set('bufferCommands', false);
+    const conn = await m.createConnection(start.uri, { bufferCommands: false }).asPromise();
+    conn.client.emit('serverDescriptionChanged', { newDescription: { type: 'Unknown' } });
+
+    const Test = conn.model('Test', new Schema({ name: String }));
+
+    const [res] = await Promise.all([
+      Test.findOne().exec(),
+      new Promise.resolve(resolve => setTimeout(resolve, 100)).then(() => {
+        conn.client.emit('serverDescriptionChanged', { newDescription: { type: 'Single' } });
+      })
+    ]);
+    assert.equal(res, null);
+
+    await m.disconnect();
+  });
+
+  it('should create connections with unique IDs also if one has been destroyed (gh-12966)', function() {
+    const m = new mongoose.Mongoose();
+    m.createConnection();
+    m.createConnection();
+    m.connections[0].destroy();
+    m.createConnection();
+    m.createConnection();
+    m.createConnection();
+    const connectionIds = m.connections.map(c => c.id);
+    assert.deepEqual(connectionIds, [1, 2, 3, 4, 5]);
+  });
+
+  it('with autoCreate = false after schema create (gh-12940)', async function() {
+    const m = new mongoose.Mongoose();
+
+    const schema = new Schema({ name: String }, {
+      collation: { locale: 'en_US', strength: 1 },
+      collection: 'gh12940_Conn'
+    });
+    const Model = m.model('gh12940_Conn', schema);
+
+    await m.connect(start.uri, {
+      autoCreate: false
+    });
+
+    await Model.init();
+
+    const res = await m.connection.db.listCollections().toArray();
+    assert.ok(!res.map(c => c.name).includes('gh12940_Conn'));
+  });
+
+  it('should not create default connection with createInitialConnection = false (gh-12965)', function() {
+    const m = new mongoose.Mongoose({
+      createInitialConnection: false
+    });
+    assert.deepEqual(m.connections.length, 0);
+  });
+
+  describe('processConnectionOptions', function() {
+    it('should not throw an error when attempting to mutate unmutable options object gh-13335', async function() {
+      const m = new mongoose.Mongoose();
+      const opts = Object.preventExtensions({});
+
+      const uri = start.uri.lastIndexOf('?') === -1 ?
+        start.uri + '?retryWrites=true&w=majority&readPreference=primaryPreferred' :
+        start.uri.slice(0, start.uri.lastIndexOf('?')) + '?retryWrites=true&w=majority&readPreference=primaryPreferred';
+
+      const conn = await m.connect(uri, opts);
+      assert.ok(conn);
+    });
   });
 });

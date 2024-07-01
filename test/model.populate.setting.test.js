@@ -9,10 +9,9 @@
 const start = require('./common');
 
 const assert = require('assert');
-const utils = require('../lib/utils');
 
 const mongoose = start.mongoose;
-const random = utils.random;
+const random = require('./util').random;
 const Schema = mongoose.Schema;
 const DocObjectId = mongoose.Types.ObjectId;
 
@@ -21,7 +20,7 @@ const DocObjectId = mongoose.Types.ObjectId;
  */
 
 describe('model: populate:', function() {
-  this.timeout(process.env.TRAVIS ? 8000 : 4500);
+  this.timeout(4500);
 
   describe('setting populated paths (gh-570)', function() {
     const types = {

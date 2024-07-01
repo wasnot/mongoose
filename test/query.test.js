@@ -6,6 +6,7 @@
 
 const start = require('./common');
 
+const { EJSON } = require('bson');
 const Query = require('../lib/query');
 const assert = require('assert');
 const util = require('./util');
@@ -88,10 +89,40 @@ describe('Query', function() {
       assert.deepEqual(query._fields, { a: 1 });
       query.select('b');
       assert.deepEqual(query._fields, { a: 1, b: 1 });
-      query.select({ c: 0 });
-      assert.deepEqual(query._fields, { a: 1, b: 1, c: 0 });
-      query.select('-d');
-      assert.deepEqual(query._fields, { a: 1, b: 1, c: 0, d: 0 });
+      query.select({ c: 1 });
+      assert.deepEqual(query._fields, { a: 1, b: 1, c: 1 });
+      query.select('d');
+      assert.deepEqual(query._fields, { a: 1, b: 1, c: 1, d: 1 });
+      done();
+    });
+
+    it('should remove existing fields from inclusive projection', function(done) {
+      const query = new Query({});
+      query.select({
+        a: 1,
+        b: 1,
+        c: 1,
+        'parent1.child1': 1,
+        'parent1.child2': 1,
+        'parent2.child1': 1,
+        'parent2.child2': 1
+      }).select({ b: 0, d: 1, 'c.child': 0, parent1: 0, 'parent2.child1': 0 });
+      assert.deepEqual(query._fields, { a: 1, c: 1, d: 1, 'parent2.child2': 1 });
+      done();
+    });
+
+    it('should remove existing fields from exclusive projection', function(done) {
+      const query = new Query({});
+      query.select({
+        a: 0,
+        b: 0,
+        c: 0,
+        'parent1.child1': 0,
+        'parent1.child2': 0,
+        'parent2.child1': 0,
+        'parent2.child2': 0
+      }).select({ b: 1, d: 0, 'c.child': 1, parent1: 1, 'parent2.child1': 1 });
+      assert.deepEqual(query._fields, { a: 0, c: 0, d: 0, 'parent2.child2': 0 });
       done();
     });
   });
@@ -733,8 +764,16 @@ describe('Query', function() {
     it('works', function(done) {
       const query = new Query({});
       query.limit(5);
-      assert.equal(query.options.limit, 5);
+      assert.strictEqual(query.options.limit, 5);
       done();
+    });
+
+    it('with string limit (gh-11017)', function() {
+      const query = new Query({});
+      query.limit('5');
+      assert.strictEqual(query.options.limit, 5);
+
+      assert.throws(() => query.limit('fail'), /CastError/);
     });
   });
 
@@ -789,7 +828,7 @@ describe('Query', function() {
 
   describe('or', function() {
     it('works', function(done) {
-      const query = new Query;
+      const query = new Query();
       query.find({ $or: [{ x: 1 }, { x: 2 }] });
       assert.equal(query._conditions.$or.length, 2);
       query.or([{ y: 'We\'re under attack' }, { z: 47 }]);
@@ -805,7 +844,7 @@ describe('Query', function() {
 
   describe('and', function() {
     it('works', function(done) {
-      const query = new Query;
+      const query = new Query();
       query.find({ $and: [{ x: 1 }, { y: 2 }] });
       assert.equal(query._conditions.$and.length, 2);
       query.and([{ z: 'We\'re under attack' }, { w: 47 }]);
@@ -884,7 +923,7 @@ describe('Query', function() {
     it('to an array of mixed', function(done) {
       const query = new Query({});
       const Product = db.model('Product', productSchema);
-      const params = { _id: new DocumentObjectId, tags: { $in: [4, 8, 15, 16] } };
+      const params = { _id: new DocumentObjectId(), tags: { $in: [4, 8, 15, 16] } };
       query.cast(Product, params);
       assert.deepEqual(params.tags.$in, [4, 8, 15, 16]);
       done();
@@ -933,7 +972,7 @@ describe('Query', function() {
       const Product = db.model('Product', productSchema);
       const Comment = db.model('Comment', commentSchema);
 
-      const id = new DocumentObjectId;
+      const id = new DocumentObjectId();
       const castedComment = { _id: id, text: 'hello there' };
       const comment = new Comment(castedComment);
 
@@ -990,7 +1029,7 @@ describe('Query', function() {
       const Product = db.model('Product', productSchema);
       const Comment = db.model('Comment', commentSchema);
 
-      const id = new DocumentObjectId;
+      const id = new DocumentObjectId();
       const castedComment = { _id: id, text: 'hello there' };
       const comment = new Comment(castedComment);
 
@@ -1032,7 +1071,7 @@ describe('Query', function() {
     it('an $elemMatch with $in works (gh-1100)', function(done) {
       const query = new Query({});
       const Product = db.model('Product', productSchema);
-      const ids = [String(new DocumentObjectId), String(new DocumentObjectId)];
+      const ids = [String(new DocumentObjectId()), String(new DocumentObjectId())];
       const params = { ids: { $elemMatch: { $in: ids } } };
       query.cast(Product, params);
       assert.ok(params.ids.$elemMatch.$in[0] instanceof DocumentObjectId);
@@ -1047,7 +1086,7 @@ describe('Query', function() {
       const Product = db.model('Product', productSchema);
       const Comment = db.model('Comment', commentSchema);
 
-      const id = new DocumentObjectId;
+      const id = new DocumentObjectId();
       const castedComment = { _id: id, text: 'hello there' };
       const comment = new Comment(castedComment);
 
@@ -1226,10 +1265,10 @@ describe('Query', function() {
       const hint = { x: 1, y: 1, z: 1 };
       const a = JSON.stringify({ hint: hint });
 
-      const q = new Query;
+      const q = new Query();
       q.hint(hint);
 
-      const options = q._optionsForExec({ schema: { options: {} } });
+      const options = q._optionsForExec();
       assert.equal(JSON.stringify(options), a);
       done();
     });
@@ -1313,18 +1352,18 @@ describe('Query', function() {
         assert.equal(query.options.tailable, false);
         done();
       });
-      it('supports passing the `await` option', function(done) {
+      it('supports passing the `awaitData` option', function(done) {
         const query = new Query({});
-        query.tailable({ awaitdata: true });
+        query.tailable({ awaitData: true });
         assert.equal(query.options.tailable, true);
-        assert.equal(query.options.awaitdata, true);
+        assert.equal(query.options.awaitData, true);
         done();
       });
     });
 
     describe('comment', function() {
       it('works', function(done) {
-        const query = new Query;
+        const query = new Query();
         assert.equal(typeof query.comment, 'function');
         assert.equal(query.comment('Lowpass is more fun'), query);
         assert.equal(query.options.comment, 'Lowpass is more fun');
@@ -1498,7 +1537,7 @@ describe('Query', function() {
 
   describe('setOptions', function() {
     it('works', function(done) {
-      const q = new Query;
+      const q = new Query();
       q.setOptions({ thing: 'cat' });
       q.setOptions({ populate: ['fans'] });
       q.setOptions({ batchSize: 10 });
@@ -1525,7 +1564,7 @@ describe('Query', function() {
       const Product = db.model('Product', productSchema);
       Product.create(
         { numbers: [3, 4, 5] },
-        { strings: 'hi there'.split(' ') }, function(err, doc1, doc2) {
+        { strings: 'hi there'.split(' '), w: 'majority' }, function(err, doc1, doc2) {
           assert.ifError(err);
           Product.find().setOptions({ limit: 1, sort: { _id: -1 }, read: 'n' }).exec(function(err, docs) {
             assert.ifError(err);
@@ -1537,7 +1576,7 @@ describe('Query', function() {
     });
 
     it('populate as array in options (gh-4446)', function(done) {
-      const q = new Query;
+      const q = new Query();
       q.setOptions({ populate: [{ path: 'path1' }, { path: 'path2' }] });
       assert.deepEqual(Object.keys(q._mongooseOptions.populate),
         ['path1', 'path2']);
@@ -1546,7 +1585,7 @@ describe('Query', function() {
   });
 
   describe('getOptions', function() {
-    const q = new Query;
+    const q = new Query();
     q.limit(10);
     q.setOptions({ maxTimeMS: 1000 });
     const opts = q.getOptions();
@@ -2300,6 +2339,13 @@ describe('Query', function() {
       });
 
       it('throw on sync exceptions in callbacks (gh-6178)', function(done) {
+        // Deno doesn't support 'uncaughtException', so there's no way to test this in Deno
+        // without starting a separate process.
+        // See: https://stackoverflow.com/questions/64871554/deno-how-to-handle-exceptions
+        if (typeof Deno !== 'undefined') {
+          return this.skip();
+        }
+
         const schema = new Schema({});
         const Test = db.model('Test', schema);
 
@@ -2489,15 +2535,14 @@ describe('Query', function() {
     });
 
     it('cast embedded discriminators with $elemMatch discriminator key (gh-7449)', async function() {
-
       const ListingLineSchema = new Schema({
         sellerId: Number
-      });
+      }, { strictQuery: false });
 
       const OrderSchema = new Schema({
         lines: [new Schema({
           amount: Number
-        }, { discriminatorKey: 'kind' })]
+        }, { discriminatorKey: 'kind', strictQuery: false })]
       });
 
       OrderSchema.path('lines').discriminator('listing', ListingLineSchema);
@@ -2587,35 +2632,23 @@ describe('Query', function() {
   describe('handles falsy and object projections with defaults (gh-3256)', function() {
     let MyModel;
 
-    before(function(done) {
+    before(function() {
       const PersonSchema = new Schema({
         name: String,
         lastName: String,
-        dependents: [String]
+        dependents: [String],
+        salary: { type: Number, default: 25000 }
       });
 
       db.deleteModel(/Person/);
-      const m = db.model('Person', PersonSchema);
+      MyModel = db.model('Person', PersonSchema);
+    });
 
-      const obj = {
+    beforeEach(async function() {
+      await MyModel.collection.insertOne({
         name: 'John',
         lastName: 'Doe',
         dependents: ['Jake', 'Jill', 'Jane']
-      };
-      m.create(obj, function(error) {
-        assert.ifError(error);
-
-        const PersonSchema = new Schema({
-          name: String,
-          lastName: String,
-          dependents: [String],
-          salary: { type: Number, default: 25000 }
-        });
-
-        db.deleteModel(/Person/);
-        MyModel = db.model('Person', PersonSchema);
-
-        done();
       });
     });
 
@@ -3442,11 +3475,11 @@ describe('Query', function() {
   });
 
   it('query with top-level _bsontype (gh-8222) (gh-8268)', async function() {
-    const userSchema = Schema({ token: String });
+    const userSchema = Schema({ token: String }, { strictQuery: true });
     const User = db.model('Test', userSchema);
 
-
     const original = await User.create({ token: 'rightToken' });
+
     let doc = await User.findOne({ token: 'wrongToken', _bsontype: 'a' });
     assert.ok(!doc);
 
@@ -3536,7 +3569,8 @@ describe('Query', function() {
     let Model;
 
     beforeEach(function() {
-      Model = db.model('Test', Schema({ name: String, age: Number }));
+      const schema = new Schema({ name: String, age: Number });
+      Model = db.model('Test', schema);
 
       return Model.create([
         { name: 'Jean-Luc Picard', age: 59 },
@@ -3545,7 +3579,6 @@ describe('Query', function() {
     });
 
     it('with findOne', async function() {
-
       const q = Model.findOne({ age: 29 });
       const q2 = q.clone();
 
@@ -3563,7 +3596,6 @@ describe('Query', function() {
     });
 
     it('with deleteOne', async function() {
-
       const q = Model.deleteOne({ age: 29 });
 
       await q;
@@ -3577,7 +3609,6 @@ describe('Query', function() {
     });
 
     it('with updateOne', async function() {
-
       const q = Model.updateOne({ name: 'Will Riker' }, { name: 'Thomas Riker' });
 
       await q;
@@ -3601,6 +3632,22 @@ describe('Query', function() {
       assert.deepEqual(q2._distinct, 'name');
       await q2;
       assert.deepEqual(res.sort(), ['Jean-Luc Picard', 'Will Riker']);
+    });
+
+    it('with hooks (gh-12365)', async function() {
+      db.deleteModel('Test');
+
+      const schema = new Schema({ name: String, age: Number });
+      let called = 0;
+      schema.pre('find', () => ++called);
+      Model = db.model('Test', schema);
+
+      assert.strictEqual(called, 0);
+
+      const res = await Model.find().clone();
+      assert.strictEqual(called, 1);
+      assert.equal(res.length, 2);
+      assert.deepEqual(res.map(doc => doc.name).sort(), ['Jean-Luc Picard', 'Will Riker']);
     });
   });
 
@@ -3876,5 +3923,498 @@ describe('Query', function() {
     await entry.save();
     const foos = await Test.find({ bars: { $not: { $size: 0 } } });
     assert.ok(foos);
+  });
+  it('should not error when $not is used on an array of strings (gh-11467)', async function() {
+    const testSchema = Schema({ names: [String] });
+    const Test = db.model('Test', testSchema);
+
+    await Test.create([{ names: ['foo'] }, { names: ['bar'] }]);
+
+    let res = await Test.find({ names: { $not: /foo/ } });
+    assert.deepStrictEqual(res.map(el => el.names), [['bar']]);
+
+    // MongoDB server < 4.4 doesn't support `{ $not: { $regex } }`, see:
+    // https://github.com/Automattic/mongoose/runs/5441062834?check_suite_focus=true
+    const version = await start.mongodVersion();
+    if (version[0] < 4 || (version[0] === 4 && version[1] < 4)) {
+      return;
+    }
+
+    res = await Test.find({ names: { $not: { $regex: 'foo' } } });
+    assert.deepStrictEqual(res.map(el => el.names), [['bar']]);
+  });
+  it('adding `exec` option does not affect the query (gh-11416)', async() => {
+    const userSchema = new Schema({
+      name: { type: String }
+    });
+
+
+    const User = db.model('User', userSchema);
+    const createdUser = await User.create({ name: 'Hafez' });
+    const users = await User.find({ _id: createdUser._id }).setOptions({ exec: false });
+
+    assert.ok(users.length, 1);
+  });
+
+  it('handles queries with EJSON deserialized RegExps (gh-11597)', async function() {
+    const testSchema = new mongoose.Schema({
+      name: String
+    });
+    const Test = db.model('Test', testSchema);
+
+    await Test.create({ name: '@foo.com' });
+    await Test.create({ name: 'adfadfasdf' });
+
+    const result = await Test.find(
+      EJSON.deserialize({ name: { $regex: '@foo.com', $options: 'i' } })
+    );
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, '@foo.com');
+  });
+
+  it('should return query helper supplied in schema options query property instead of undefined', function(done) {
+    const Model = db.model('Test', new Schema({
+      userName: {
+        type: String,
+        required: [true, 'userName is required']
+      }
+    }, {
+      query: {
+        byUserName(userName) {
+          return this.where({ userName });
+        }
+      }
+    }));
+
+    Model.create({ userName: 'test' }, function(error) {
+      if (error instanceof Error) {
+        return done(error);
+      }
+      Model.find().byUserName('test').exec(function(error, docs) {
+        if (error instanceof Error) {
+          return done(error);
+        }
+        assert.equal(docs.length, 1);
+        assert.equal(docs[0].userName, 'test');
+        done();
+      });
+    });
+  });
+
+  it('allows a transform option for lean on a query (gh-10423)', async function() {
+    const arraySchema = new mongoose.Schema({
+      sub: String
+    });
+    const subDoc = new mongoose.Schema({
+      nickName: String
+    });
+    const testSchema = new mongoose.Schema({
+      name: String,
+      foo: [arraySchema],
+      otherName: subDoc
+    });
+    const Test = db.model('Test', testSchema);
+    await Test.create({ name: 'foo', foo: [{ sub: 'Test' }, { sub: 'Testerson' }], otherName: { nickName: 'Bar' } });
+
+    const result = await Test.find().lean({
+      transform: (doc) => {
+        delete doc._id;
+        return doc;
+      }
+    });
+    assert.strictEqual(result[0]._id, undefined);
+    assert.strictEqual(result[0].otherName._id, undefined);
+    assert.strictEqual(result[0].foo[0]._id, undefined);
+    assert.strictEqual(result[0].foo[1]._id, undefined);
+
+    const single = await Test.findOne().lean({
+      transform: (doc) => {
+        delete doc._id;
+        return doc;
+      }
+    });
+    assert.strictEqual(single._id, undefined);
+    assert.strictEqual(single.otherName._id, undefined);
+    assert.strictEqual(single.foo[0]._id, undefined);
+    assert.strictEqual(single.foo[0]._id, undefined);
+  });
+
+  it('handles a lean transform that deletes _id with populate (gh-12143) (gh-10423)', async function() {
+    const testSchema = Schema({
+      name: String,
+      user: {
+        type: mongoose.Types.ObjectId,
+        ref: 'User'
+      }
+    });
+
+    const userSchema = Schema({
+      name: String
+    });
+
+    const Test = db.model('Test', testSchema);
+    const User = db.model('User', userSchema);
+
+    const user = await User.create({ name: 'John Smith' });
+    let test = await Test.create({ name: 'test', user });
+
+    test = await Test.findById(test).populate('user').lean({
+      transform: (doc) => {
+        delete doc._id;
+        delete doc.__v;
+        return doc;
+      }
+    });
+
+    assert.ok(test);
+    assert.deepStrictEqual(test, {
+      name: 'test',
+      user: { name: 'John Smith' }
+    });
+  });
+
+  it('skips applying default projections over slice projections (gh-11940)', async function() {
+    const commentSchema = new mongoose.Schema({
+      comment: String
+    });
+
+    const testSchema = new mongoose.Schema({
+      name: String,
+      comments: { type: [commentSchema], select: false }
+    });
+
+    const Test = db.model('Test', testSchema);
+
+    const { _id } = await Test.create({
+      name: 'Test',
+      comments: [{ comment: 'test1' }, { comment: 'test2' }]
+    });
+
+    const doc = await Test.findById(_id).slice('comments', [1, 1]);
+    assert.equal(doc.comments.length, 1);
+    assert.equal(doc.comments[0].comment, 'test2');
+
+  });
+
+  describe('set()', function() {
+    it('overwrites top-level keys if setting to undefined (gh-12155)', function() {
+      const testSchema = new mongoose.Schema({
+        key: String,
+        prop: String
+      });
+      const Test = db.model('Test', testSchema);
+
+      const query = Test.findOneAndUpdate({}, { key: '', prop: 'foo' });
+
+      query.set('key', undefined);
+      const update = query.getUpdate();
+
+      assert.deepEqual(update, {
+        $set: { key: undefined },
+        prop: 'foo'
+      });
+    });
+  });
+
+  it('select: false is ignored for type Map (gh-12445)', async function() {
+    const testSchema = new mongoose.Schema({
+      select: {
+        type: Map,
+        of: Object
+      },
+      doNotSelect: {
+        type: Map,
+        of: Object,
+        select: false
+      }
+    });
+
+    const Test = db.model('Test', testSchema);
+    await Test.create({
+      select: { key: { some: 'value' } },
+      doNotSelect: { otherKey: { someOther: 'value' } }
+    });
+
+    const item = await Test.findOne();
+    assert.equal(item.get('select.key.some'), 'value');
+    assert.equal(item.doNotSelect, undefined);
+  });
+
+  it('Map field with select: false is selected when explicitly requested (gh-12603)', async function() {
+    const testSchema = new mongoose.Schema({
+      title: String,
+      body: {
+        type: Map,
+        of: { en: String, pt: String },
+        select: false
+      }
+    });
+
+    const Test = db.model('Test', testSchema);
+    await Test.create({
+      title: 'test',
+      body: {
+        A: { en: 'en test A value', pt: 'pt test A value' },
+        B: { en: 'en test B value', pt: 'pt test B value' }
+      }
+    });
+
+    const item = await Test.findOne({}).select('+body');
+    assert.equal(item.title, 'test');
+    assert.equal(item.get('body.A.en'), 'en test A value');
+
+    const item2 = await Test.findOne({}).select('body');
+    assert.equal(item2.title, undefined);
+    assert.equal(item2.get('body.A.en'), 'en test A value');
+  });
+
+  it('treats ObjectId as object with `_id` for `merge()` (gh-12325)', async function() {
+    const testSchema = new mongoose.Schema({ name: String });
+    const Test = db.model('Test', testSchema);
+    const _id = new mongoose.Types.ObjectId();
+
+    let q = Test.find(_id);
+
+    assert.ok(q.getFilter()._id instanceof mongoose.Types.ObjectId);
+    assert.equal(q.getFilter()._id.toHexString(), _id.toHexString());
+
+    q = Test.findOne(_id);
+
+    assert.ok(q.getFilter()._id instanceof mongoose.Types.ObjectId);
+    assert.equal(q.getFilter()._id.toHexString(), _id.toHexString());
+  });
+
+  it('avoid throwing error when modifying nested field with same name as discriminator key (gh-12517)', async function() {
+    const options = { discriminatorKey: 'kind', strict: 'throw' };
+    const testSchema = new mongoose.Schema({ name: String, kind: String, animals: { kind: String, world: String } }, options);
+    const Test = db.model('Test', testSchema);
+
+    Test.discriminator(
+      'ClickedTest',
+      new mongoose.Schema({ url: String }, options)
+    );
+
+    const newItem = await Test.create({
+      name: 'Name',
+      animals: { kind: 'Kind', world: 'World' }
+    });
+
+    const updatedItem = await Test.findByIdAndUpdate(
+      newItem._id,
+      {
+        $set: {
+          name: 'Name2',
+          animals: { kind: 'Kind2', world: 'World2' }
+        }
+      },
+      {
+        new: true
+      }
+    );
+
+    assert.deepEqual(updatedItem.animals, { kind: 'Kind2', world: 'World2' });
+
+    await assert.rejects(async() => {
+      await Test.findByIdAndUpdate(
+        newItem._id,
+        {
+          $set: {
+            name: 'Name2',
+            kind: 'Kind2'
+          }
+        }
+      );
+    }, { message: 'Can\'t modify discriminator key "kind" on discriminator model' });
+  });
+
+  it('avoid throwing error when modifying field with same name as nested discriminator key (gh-12517)', async function() {
+    const options = { discriminatorKey: 'animals.kind', strict: 'throw' };
+    const testSchema = new mongoose.Schema({ name: String, kind: String, animals: { kind: String, world: String } }, options);
+    const Test = db.model('Test', testSchema);
+
+    Test.discriminator(
+      'ClickedTest',
+      new mongoose.Schema({ url: String }, options)
+    );
+
+    const newItem = await Test.create({
+      name: 'Name',
+      kind: 'Kind',
+      animals: { world: 'World' }
+    });
+
+    const updatedItem = await Test.findByIdAndUpdate(
+      newItem._id,
+      {
+        $set: {
+          name: 'Name2',
+          kind: 'Kind2'
+        }
+      },
+      {
+        new: true
+      }
+    );
+
+    assert.equal(updatedItem.name, 'Name2');
+    assert.equal(updatedItem.kind, 'Kind2');
+
+    await assert.rejects(async() => {
+      await Test.findByIdAndUpdate(
+        newItem._id,
+        {
+          $set: {
+            animals: { kind: 'Kind2', world: 'World2' }
+          }
+        }
+      );
+    }, { message: 'Can\'t modify discriminator key "animals.kind" on discriminator model' });
+  });
+
+  it('global strictQuery should work if applied after schema creation (gh-12703)', async() => {
+    const m = new mongoose.Mongoose();
+
+    await m.connect(start.uri);
+
+    const schema = new mongoose.Schema({ title: String });
+
+    const Test = m.model('test', schema);
+
+    m.set('strictQuery', false);
+
+    await Test.create({
+      title: 'chimichanga'
+    });
+    await Test.create({
+      title: 'burrito bowl'
+    });
+    await Test.create({
+      title: 'taco supreme'
+    });
+
+    const cond = {
+      $or: [
+        {
+          title: {
+            $regex: 'urri',
+            $options: 'i'
+          }
+        },
+        {
+          name: {
+            $regex: 'urri',
+            $options: 'i'
+          }
+        }
+      ]
+    };
+
+    const found = await Test.find(cond);
+    assert.strictEqual(found.length, 1);
+    assert.strictEqual(found[0].title, 'burrito bowl');
+  });
+
+  it('update operation should not remove fields set to undefined (gh-12930)', async function() {
+    const m = new mongoose.Mongoose();
+
+    await m.connect(start.uri);
+
+    const schema = new mongoose.Schema({ title: String });
+
+    const Test = m.model('test', schema);
+
+    const doc = await Test.create({
+      title: 'test'
+    });
+
+    assert.strictEqual(doc.title, 'test');
+
+    const updatedDoc = await Test.findOneAndUpdate(
+      {
+        _id: doc._id
+      },
+      { title: undefined },
+      { returnOriginal: false }
+    ).lean();
+
+    assert.strictEqual(updatedDoc.title, 'test');
+  });
+
+  it('handles $elemMatch with nested schema (gh-12902)', async function() {
+    const bioSchema = new Schema({
+      name: { type: String }
+    });
+
+    const Book = db.model('book', new Schema({
+      name: String,
+      authors: [{
+        bio: bioSchema
+      }]
+    }));
+
+    await new Book({
+      name: 'Mongoose Fundamentals',
+      authors: [{
+        bio: {
+          name: 'Foo Bar'
+        }
+      }]
+    }).save();
+
+    const books = await Book.find({
+      name: 'Mongoose Fundamentals',
+      authors: {
+        $elemMatch: {
+          'bio.name': { $in: ['Foo Bar'] },
+          'bio.location': 'Mandurah' // Not in schema
+        }
+      }
+    });
+
+    assert.strictEqual(books.length, 1);
+  });
+  it('should provide a clearer error message when sorting with empty string', async function() {
+    const testSchema = new Schema({
+      name: { type: String }
+    });
+
+    const Error = db.model('error', testSchema);
+    await assert.rejects(async() => {
+      await Error.find().sort('-');
+    }, { message: 'Invalid field "" passed to sort()' });
+  });
+
+  it('does not apply sibling path defaults if using nested projection (gh-14115)', async function() {
+    const version = await start.mongodVersion();
+    if (version[0] < 5) {
+      return this.skip();
+    }
+
+    const userSchema = new mongoose.Schema({
+      name: String,
+      account: {
+        amount: Number,
+        owner: { type: String, default: () => 'OWNER' },
+        taxIds: [Number]
+      }
+    });
+    const User = db.model('User', userSchema);
+
+    const { _id } = await User.create({
+      name: 'test',
+      account: {
+        amount: 25,
+        owner: 'test',
+        taxIds: [42]
+      }
+    });
+
+    const doc = await User
+      .findOne({ _id }, { name: 1, account: { amount: 1 } })
+      .orFail();
+    assert.strictEqual(doc.name, 'test');
+    assert.strictEqual(doc.account.amount, 25);
+    assert.strictEqual(doc.account.owner, undefined);
+    assert.strictEqual(doc.account.taxIds, undefined);
   });
 });

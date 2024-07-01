@@ -4,17 +4,20 @@ const assert = require('assert');
 const start = require('../common');
 
 const mongoose = new start.mongoose.Mongoose();
-const Schema = mongoose.Schema;
 
 // This file is in `es-next` because it uses async/await for convenience
 
 describe('Virtuals', function() {
   before(async function() {
-    await mongoose.connect('mongodb://localhost:27017/test');
+    await mongoose.connect(start.uri);
   });
 
   beforeEach(function() {
     mongoose.deleteModel(/.*/);
+  });
+
+  after(async() => {
+    await mongoose.disconnect();
   });
 
   it('basic', async function() {
@@ -27,7 +30,7 @@ describe('Virtuals', function() {
     });
     const User = mongoose.model('User', userSchema);
 
-    let doc = await User.create({ email: 'test@gmail.com' });
+    const doc = await User.create({ email: 'test@gmail.com' });
     // `domain` is now a property on User documents.
     doc.domain; // 'gmail.com'
     // acquit:ignore:start
@@ -79,10 +82,10 @@ describe('Virtuals', function() {
     const User = mongoose.model('User', userSchema);
 
     const doc = new User({ _id: 1, email: 'test@gmail.com' });
-    
+
     doc.toJSON().domain; // 'gmail.com'
     // {"_id":1,"email":"test@gmail.com","domain":"gmail.com","id":"1"}
-    JSON.stringify(doc); 
+    JSON.stringify(doc);
 
     // To skip applying virtuals, pass `virtuals: false` to `toJSON()`
     doc.toJSON({ virtuals: false }).domain; // undefined
@@ -133,7 +136,6 @@ describe('Virtuals', function() {
     // acquit:ignore:end
     // Will **not** find any results, because `domain` is not stored in
     // MongoDB.
-    mongoose.set('debug', true)
     const doc = await User.findOne({ domain: 'gmail.com' }, null, { strictQuery: false });
     doc; // undefined
     // acquit:ignore:start

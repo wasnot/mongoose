@@ -552,7 +552,7 @@ describe('timestamps', function() {
     let CatSchema;
     let Cat;
 
-    before(function() {
+    beforeEach(function() {
       CatSchema = new Schema({
         name: String,
         hobby: String
@@ -622,6 +622,20 @@ describe('timestamps', function() {
       cat.hobby = 'fishing';
 
       await cat.save({ timestamps: false });
+
+      assert.strictEqual(cat.updatedAt, old);
+    });
+
+    it('can skip with `$timestamps(false)` (gh-12117)', async function() {
+      const cat = await Cat.findOne();
+      const old = cat.updatedAt;
+
+      await delay(10);
+
+      cat.hobby = 'fishing';
+
+      cat.$timestamps(false);
+      await cat.save();
 
       assert.strictEqual(cat.updatedAt, old);
     });
@@ -740,10 +754,6 @@ describe('timestamps', function() {
           });
         });
       });
-    });
-
-    after(function() {
-      return Cat.deleteMany({});
     });
   });
 
@@ -927,8 +937,134 @@ describe('timestamps', function() {
     assert.equal(church.events[0].users[1].email, 'test2@google.com');
     assert.ok(church.events[0].users[1].createdAt);
   });
-});
 
+  it('sets createdAt when creating new single nested subdoc (gh-11603)', async function() {
+    const childSchema = new mongoose.Schema(
+      { name: String },
+      { timestamps: { createdAt: 'created', updatedAt: false }, _id: false }
+    );
+
+    const testSchema = new mongoose.Schema({ child: childSchema, age: Number });
+
+    const Test = db.model('Test', testSchema);
+
+    await Test.create({ age: 10 });
+    await Test.findOneAndUpdate(
+      { child: { $exists: false } },
+      { $set: { child: { name: 'Update Creation' } } }
+    );
+
+    let updatedParent = await Test.findOne({ age: 10 });
+    assert.ok(updatedParent.child.created instanceof Date);
+
+    await Test.create({ age: 12 });
+    const parentToChange = await Test.findOne({ child: { $exists: false } });
+
+    parentToChange.child = { name: 'Save Creation' };
+    await parentToChange.save();
+
+    updatedParent = await Test.findOne({ age: 12 });
+    assert.ok(updatedParent.child.created instanceof Date);
+    const date = updatedParent.child.created;
+
+    updatedParent.child.name = 'test update';
+    await updatedParent.save();
+
+    updatedParent = await Test.findOne({ age: 12 });
+    assert.ok(updatedParent.child.created instanceof Date);
+    assert.strictEqual(updatedParent.child.created.valueOf(), date.valueOf());
+  });
+
+  it('sets timestamps on sub-schema if parent schema does not have timestamps: true (gh-12119)', async function() {
+    // `timestamps` option set to true on deepest sub document
+    const ConditionSchema = new mongoose.Schema({
+      kind: String,
+      amount: Number
+    }, { timestamps: true });
+
+    // no `timestamps` option defined
+    const ProfileSchema = new mongoose.Schema({
+      conditions: [ConditionSchema]
+    });
+
+    const UserSchema = new mongoose.Schema({
+      name: String,
+      profile: {
+        type: ProfileSchema
+      }
+    }, { timestamps: true });
+
+    const User = db.model('User', UserSchema);
+
+    const res = await User.findOneAndUpdate(
+      { name: 'test' },
+      { $set: { profile: { conditions: [{ kind: 'price', amount: 10 }] } } },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    assert.ok(res.profile.conditions[0].createdAt);
+    assert.ok(res.profile.conditions[0].updatedAt);
+  });
+
+  it('works with insertMany() and embedded discriminators (gh-12150)', async function() {
+    const AssetSchema = new Schema({ url: String, size: String }, { timestamps: true });
+    const HeaderSectionSchema = new Schema({
+      title: String,
+      image: AssetSchema
+    });
+
+    // Abstract section
+    const BaseSectionSchema = new Schema({
+      isVisible: Boolean
+    }, { discriminatorKey: 'kind' });
+
+    // Main Schema
+    const PageSchema = new Schema({
+      sections: [BaseSectionSchema] // Same error without the array "sections: BaseSectionSchema"
+    }, { timestamps: true });
+
+    const sections = PageSchema.path('sections');
+    sections.discriminator('header', HeaderSectionSchema);
+
+    const Test = db.model('Test', PageSchema);
+
+    await Test.insertMany([{
+      sections: {
+        isVisible: true,
+        kind: 'header',
+        title: 'h1'
+      }
+    }]);
+
+    const doc = await Test.findOne();
+    assert.equal(doc.sections.length, 1);
+    assert.equal(doc.sections[0].title, 'h1');
+  });
+
+  it('findOneAndUpdate creates subdocuments with timestamps in correct order (gh-12475)', async function() {
+    const testSchema = new Schema(
+      {
+        uuid: String,
+        addresses: [new Schema({ location: String }, { timestamps: true })]
+      },
+      { timestamps: true }
+    );
+
+    const Test = db.model('Test', testSchema);
+
+    const item = new Test({ uuid: '123', addresses: [{ location: 'earth' }] });
+    await item.save();
+
+    const newItem = await Test.findOneAndUpdate({ uuid: '123' }, {
+      uuid: '456', $push: { addresses: { location: 'earth' } }
+    }, { upsert: true, new: true, runValidators: true });
+
+    for (const address of newItem.addresses) {
+      const keys = Object.keys(address.toObject());
+      assert.deepStrictEqual(keys, ['location', '_id', 'createdAt', 'updatedAt']);
+    }
+  });
+});
 
 async function delay(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));

@@ -3,27 +3,27 @@ const mongoose = require('../');
 const Schema = mongoose.Schema;
 const docs = process.argv[2] ? process.argv[2] | 0 : 100;
 
-const A = mongoose.model('A', Schema({name: 'string'}));
+const A = mongoose.model('A', Schema({ name: 'string' }));
 
 const nested = Schema({
-  a: {type: Schema.ObjectId, ref: 'A'}
+  a: { type: Schema.ObjectId, ref: 'A' }
 });
 
 const B = mongoose.model('B', Schema({
-  as: [{type: Schema.ObjectId, ref: 'A'}],
-  a: {type: Schema.ObjectId, ref: 'A'},
+  as: [{ type: Schema.ObjectId, ref: 'A' }],
+  a: { type: Schema.ObjectId, ref: 'A' },
   nested: [nested]
 }));
 
 let start;
 let count = 0;
 
-mongoose.connect('localhost', 'benchmark-populate', function(err) {
+mongoose.connect('mongodb://127.0.0.1/mongoose-bench', function(err) {
   if (err) {
     return done(err);
   }
 
-  A.create({name: 'wooooooooooooooooooooooooooooooooooooooooot'}, function(err, a) {
+  A.create({ name: 'wooooooooooooooooooooooooooooooooooooooooot' }, function(err, a) {
     if (err) {
       return done(err);
     }
@@ -33,7 +33,7 @@ mongoose.connect('localhost', 'benchmark-populate', function(err) {
       new B({
         as: [a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a],
         a: a,
-        nested: [{a: a}, {a: a}, {a: a}, {a: a}, {a: a}, {a: a}]
+        nested: [{ a: a }, { a: a }, { a: a }, { a: a }, { a: a }, { a: a }]
       }).save(function(err) {
         if (err) {
           return done(err);

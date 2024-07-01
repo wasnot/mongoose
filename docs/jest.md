@@ -4,11 +4,17 @@ Jest is a JavaScript runtime developed by Facebook that is usually used for test
 Because Jest is designed primarily for testing React applications, using it to test Node.js server-side applications comes with a lot of caveats.
 We strongly recommend using a different testing framework, like [Mocha](https://mochajs.org/).
 
+To suppress any Jest warnings from Mongoose, set the `SUPPRESS_JEST_WARNINGS` environment variable:
+
+```
+env SUPPRESS_JEST_WARNINGS=1 npm test
+```
+
 If you choose to delve into dangerous waters and test Mongoose apps with Jest, here's what you need to know:
 
 <h2 id="recommended-testenvironment"><a href="#recommended-testenvironment">Recommended <code>testEnvironment</code></a></h2>
 
-If you are using Jest `<=26`, do **not** use Jest's default [`jsdom` test environment](https://jestjs.io/docs/en/configuration.html#testenvironment-string) when testing Mongoose apps, _unless_ you are explicitly testing an application that only uses [Mongoose's browser library](https://mongoosejs.com/docs/browser.html). In Jest `>=27`, ["node" is Jest's default `testEnvironment`](https://jestjs.io/ro/blog/2021/05/25/jest-27#flipping-defaults), so this is no longer an issue.
+If you are using Jest `<=26`, do **not** use Jest's default [`jsdom` test environment](https://jestjs.io/docs/en/configuration.html#testenvironment-string) when testing Mongoose apps, _unless_ you are explicitly testing an application that only uses [Mongoose's browser library](browser.html). In Jest `>=27`, ["node" is Jest's default `testEnvironment`](https://jestjs.io/ro/blog/2021/05/25/jest-27#flipping-defaults), so this is no longer an issue.
 
 The `jsdom` test environment attempts to create a browser-like test
 environment in Node.js, and it comes with numerous nasty surprises like a

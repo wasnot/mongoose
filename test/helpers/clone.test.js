@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('assert');
+
+require('../common'); // required for side-effect setup (so that the default driver is set-up)
 const clone = require('../../lib/helpers/clone');
 const symbols = require('../../lib/helpers/symbols');
 const ObjectId = require('../../lib/types/objectid');
@@ -148,9 +150,11 @@ describe('clone', () => {
 
     describe('constructor is RegExp', () => {
       it('return new equal date ', () => {
-        const base = new RegExp(/A-Z.*/);
+        const base = new RegExp(/A-Z.*/g);
+        base.lastIndex = 2;
         const cloned = clone(base);
         assert.deepStrictEqual(base, cloned);
+        assert.ok(base.lastIndex === cloned.lastIndex);
       });
     });
   });

@@ -82,6 +82,28 @@ describe('cast: ', function() {
     });
   });
 
+  describe('$all', function() {
+    it('casts $elemMatch (gh-11314)', async function() {
+      const nested = new Schema({ _id: Number }, {});
+
+      const schema = new Schema({ status: [nested] });
+
+      const filter = {
+        status: {
+          $all: {
+            $elemMatch: { _id: 42 }
+          }
+        }
+      };
+
+      assert.deepStrictEqual(cast(schema, filter), {
+        status: {
+          $all: [{ $elemMatch: { _id: 42 } }]
+        }
+      });
+    });
+  });
+
   describe('bitwise query operators: ', function() {
     it('with a number', function() {
       const schema = new Schema({ x: Buffer });
@@ -115,6 +137,87 @@ describe('cast: ', function() {
       const res = cast(schema, { $expr: { $gt: ['$spent', '$budget'] } }, { strict: true });
       assert.ok(res.$expr);
       assert.deepEqual(res.$expr.$gt, ['$spent', '$budget']);
+    });
+  });
+
+  it('uses nested schema strict by default (gh-11291)', function() {
+    const nested = new Schema({}, {
+      id: false,
+      _id: false,
+      strict: false
+    });
+
+    const schema = new Schema({ roles: [String], customFields: nested });
+
+    const res = cast(schema, {
+      roles: { $ne: 'super' },
+      'customFields.region': { $exists: true }
+    });
+
+    assert.deepEqual(res, {
+      roles: { $ne: 'super' },
+      'customFields.region': { $exists: true }
+    });
+  });
+
+  it('casts $comment (gh-14576)', function() {
+    const schema = new Schema({ name: String });
+
+    let res = cast(schema, {
+      $comment: 'test'
+    });
+    assert.deepStrictEqual(res, { $comment: 'test' });
+
+    res = cast(schema, {
+      $comment: 42
+    });
+    assert.deepStrictEqual(res, { $comment: '42' });
+
+    assert.throws(
+      () => cast(schema, {
+        $comment: { name: 'taco' }
+      }),
+      /\$comment/
+    );
+
+    const schema2 = new Schema({ $comment: Number });
+    res = cast(schema2, {
+      $comment: 42
+    });
+    assert.deepStrictEqual(res, { $comment: 42 });
+  });
+
+  it('avoids setting stripped out nested schema values to undefined (gh-11291)', function() {
+    const nested = new Schema({}, {
+      id: false,
+      _id: false,
+      strict: false
+    });
+
+    const schema = new Schema({ roles: [String], customFields: nested });
+
+    const res = cast(schema, {
+      roles: { $ne: 'super' },
+      'customFields.region': { $exists: true }
+    }, { strictQuery: true });
+
+    assert.deepEqual(res, {
+      roles: { $ne: 'super' }
+    });
+  });
+
+  it('uses schema-level strictQuery over schema-level strict (gh-12508)', function() {
+    const schema = new Schema({}, {
+      strict: 'throw',
+      strictQuery: false
+    });
+
+    const res = cast(schema, {
+      name: 'foo'
+    });
+
+    assert.deepEqual(res, {
+      name: 'foo'
     });
   });
 });

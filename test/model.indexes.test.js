@@ -7,7 +7,7 @@
 const start = require('./common');
 
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
@@ -348,11 +348,6 @@ describe('model', function() {
       });
 
       describe('global autoIndexes (gh-1875)', function() {
-        beforeEach(() => {
-          const Test = db.model('Test', Schema({}));
-          return Test.collection.dropIndexes();
-        });
-
         beforeEach(() => db.deleteModel(/Test/));
 
         it('will create indexes as a default', async function() {
@@ -436,32 +431,30 @@ describe('model', function() {
     });
   });
 
-  it('skips automatic indexing on childSchema if autoIndex: false (gh-9150)', function() {
+  it('skips automatic indexing on childSchema if autoIndex: false (gh-9150)', async function() {
     const nestedSchema = mongoose.Schema({
       name: { type: String, index: true }
     }, { autoIndex: false });
+
     const schema = mongoose.Schema({
       nested: nestedSchema,
       top: { type: String, index: true }
     });
-    let Model;
 
-    return Promise.resolve().
-      then(() => {
-        Model = db.model('Model', schema);
-        return Model.init();
-      }).
-      then(() => Model.listIndexes()).
-      then(indexes => {
-        assert.equal(indexes.length, 2);
-        assert.deepEqual(indexes[1].key, { top: 1 });
-      });
+    const Model = db.model('Model', schema);
+
+    await Model.init();
+
+    const indexes = await Model.listIndexes();
+
+    assert.equal(indexes.length, 2);
+    assert.deepEqual(indexes[1].key, { top: 1 });
   });
 
   describe('discriminators with unique', function() {
     this.timeout(5000);
 
-    it('converts to partial unique index (gh-6347)', function() {
+    it('converts to partial unique index (gh-6347)', async function() {
       const baseOptions = { discriminatorKey: 'kind' };
       const baseSchema = new Schema({}, baseOptions);
 
@@ -483,37 +476,35 @@ describe('model', function() {
 
       const Device = Base.discriminator('Device', deviceSchema);
 
-      return Promise.all([
+      await Promise.all([
         Base.init(),
         User.init(),
         Device.init(),
         Base.create({}),
         User.create({ emailId: 'val@karpov.io', firstName: 'Val' }),
         Device.create({ name: 'Samsung', model: 'Galaxy' })
-      ]).then(() => Base.listIndexes()).
-        then(indexes => indexes.find(i => i.key.other)).
-        then(index => {
-          assert.deepEqual(index.key, { other: 1 });
-          assert.deepEqual(index.partialFilterExpression, { kind: 'Device' });
-        });
+      ]);
+      const indexes = await Base.listIndexes();
+      const index = indexes.find(i => i.key.other);
+      assert.deepEqual(index.key, { other: 1 });
+      assert.deepEqual(index.partialFilterExpression, { kind: 'Device' });
     });
 
-    it('decorated discriminator index with syncIndexes (gh-6347)', function() {
-      const baseOptions = { discriminatorKey: 'kind' };
-      const baseSchema = new Schema({}, baseOptions);
+    it('decorated discriminator index with syncIndexes (gh-6347)', async function() {
+      const userSchema = new Schema({}, { discriminatorKey: 'kind', autoIndex: false });
 
-      const Base = db.model('Test', baseSchema);
+      const User = db.model('User', userSchema);
 
-      const userSchema = new Schema({
+      const customerSchema = new Schema({
         emailId: { type: String, unique: true }, // Should become a partial
         firstName: { type: String }
       });
 
-      const User = Base.discriminator('User', userSchema);
+      const Customer = User.discriminator('Customer', customerSchema);
 
-      return User.init().
-        then(() => User.syncIndexes()).
-        then(dropped => assert.equal(dropped.length, 0));
+      await Customer.init();
+      const droppedIndexes = await Customer.syncIndexes();
+      assert.equal(droppedIndexes.length, 0);
     });
 
     it('uses schema-level collation by default (gh-9912)', async function() {
@@ -602,6 +593,72 @@ describe('model', function() {
       await User.collection.drop();
     });
 
+    it('should not re-create a compound text index that involves non-text indexes, using syncIndexes (gh-13136)', function(done) {
+      const Test = new Schema({
+        title: {
+          type: String
+        },
+        description: {
+          type: String
+        },
+        age: {
+          type: Number
+        }
+      }, {
+        autoIndex: false
+      });
+
+      Test.index({
+        title: 'text',
+        description: 'text',
+        age: 1
+      });
+
+      const TestModel = db.model('Test', Test);
+      TestModel.syncIndexes().then((results1) => {
+        assert.deepEqual(results1, []);
+        // second call to syncIndexes should return an empty array, representing 0 deleted indexes
+        TestModel.syncIndexes().then((results2) => {
+          assert.deepEqual(results2, []);
+          done();
+        });
+      });
+    });
+
+    it('should not find a diff when calling diffIndexes after syncIndexes involving a text and non-text compound index (gh-13136)', function(done) {
+      const Test = new Schema({
+        title: {
+          type: String
+        },
+        description: {
+          type: String
+        },
+        age: {
+          type: Number
+        }
+      }, {
+        autoIndex: false
+      });
+
+      Test.index({
+        title: 'text',
+        description: 'text',
+        age: 1
+      });
+
+      const TestModel = db.model('Test', Test);
+
+      TestModel.diffIndexes().then((diff) => {
+        assert.deepEqual(diff, { toCreate: [{ age: 1, title: 'text', description: 'text' }], toDrop: [] });
+        TestModel.syncIndexes().then(() => {
+          TestModel.diffIndexes().then((diff2) => {
+            assert.deepEqual(diff2, { toCreate: [], toDrop: [] });
+            done();
+          });
+        });
+      });
+    });
+
     it('cleanIndexes (gh-6676)', async function() {
 
       let M = db.model('Test', new Schema({
@@ -627,7 +684,6 @@ describe('model', function() {
       ]);
     });
     it('should prevent collation on text indexes (gh-10044)', async function() {
-
       const userSchema = new mongoose.Schema({ username: String }, {
         collation: {
           locale: 'en',
@@ -643,8 +699,8 @@ describe('model', function() {
       assert.ok(!indexes[1].collation);
       await User.collection.drop();
     });
-    it('should do a dryRun feat-10316', async function() {
 
+    it('should do a dryRun feat-10316', async function() {
       const userSchema = new mongoose.Schema({ username: String }, { password: String }, { email: String });
       const User = db.model('Upson', userSchema);
       await User.collection.createIndex({ age: 1 });

@@ -8,7 +8,8 @@ const start = require('./common');
 
 const Promise = require('bluebird');
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
+const { v4: uuidv4 } = require('uuid');
 
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
@@ -106,6 +107,7 @@ describe('schema', function() {
     });
 
     it('string regexp', function(done) {
+      let remaining = 10;
       const Test = new Schema({
         simple: { type: String, match: /[a-z]/ }
       });
@@ -114,6 +116,7 @@ describe('schema', function() {
 
       Test.path('simple').doValidate('az', function(err) {
         assert.ifError(err);
+        --remaining || done();
       });
 
       Test.path('simple').match(/[0-9]/);
@@ -121,30 +124,37 @@ describe('schema', function() {
 
       Test.path('simple').doValidate('12', function(err) {
         assert.ok(err instanceof ValidatorError);
+        --remaining || done();
       });
 
       Test.path('simple').doValidate('a12', function(err) {
         assert.ifError(err);
+        --remaining || done();
       });
 
       Test.path('simple').doValidate('', function(err) {
         assert.ifError(err);
+        --remaining || done();
       });
       Test.path('simple').doValidate(null, function(err) {
         assert.ifError(err);
+        --remaining || done();
       });
       Test.path('simple').doValidate(undefined, function(err) {
         assert.ifError(err);
+        --remaining || done();
       });
       Test.path('simple').validators = [];
       Test.path('simple').match(/[1-9]/);
       Test.path('simple').doValidate(0, function(err) {
         assert.ok(err instanceof ValidatorError);
+        --remaining || done();
       });
 
       Test.path('simple').match(null);
       Test.path('simple').doValidate(0, function(err) {
         assert.ok(err instanceof ValidatorError);
+        --remaining || done();
       });
 
       done();
@@ -193,6 +203,7 @@ describe('schema', function() {
       });
 
       it('number min and max', function(done) {
+        let remaining = 4;
         const Tobi = new Schema({
           friends: { type: Number, max: 15, min: 5 }
         });
@@ -201,6 +212,7 @@ describe('schema', function() {
 
         Tobi.path('friends').doValidate(10, function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         Tobi.path('friends').doValidate(100, function(err) {
@@ -208,29 +220,32 @@ describe('schema', function() {
           assert.equal(err.path, 'friends');
           assert.equal(err.kind, 'max');
           assert.equal(err.value, 100);
+          --remaining || done();
         });
 
         Tobi.path('friends').doValidate(1, function(err) {
           assert.ok(err instanceof ValidatorError);
           assert.equal(err.path, 'friends');
           assert.equal(err.kind, 'min');
+          --remaining || done();
         });
 
         // null is allowed
         Tobi.path('friends').doValidate(null, function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         Tobi.path('friends').min();
         Tobi.path('friends').max();
 
         assert.equal(Tobi.path('friends').validators.length, 0);
-        done();
       });
     });
 
     describe('required', function() {
       it('string required', function(done) {
+        let remaining = 4;
         const Test = new Schema({
           simple: String
         });
@@ -240,24 +255,27 @@ describe('schema', function() {
 
         Test.path('simple').doValidate(null, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate(undefined, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate('', function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate('woot', function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
-
-        done();
       });
 
       it('string conditional required', function(done) {
+        let remaining = 8;
         const Test = new Schema({
           simple: String
         });
@@ -272,79 +290,89 @@ describe('schema', function() {
 
         Test.path('simple').doValidate(null, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate(undefined, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate('', function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate('woot', function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         required = false;
 
         Test.path('simple').doValidate(null, function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate(undefined, function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate('', function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         Test.path('simple').doValidate('woot', function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
-
-        done();
       });
 
       it('number required', function(done) {
+        let remaining = 3;
         const Edwald = new Schema({
           friends: { type: Number, required: true }
         });
 
         Edwald.path('friends').doValidate(null, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Edwald.path('friends').doValidate(undefined, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Edwald.path('friends').doValidate(0, function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
-
-        done();
       });
 
       it('date required', function(done) {
+        let remaining = 3;
         const Loki = new Schema({
           birth_date: { type: Date, required: true }
         });
 
         Loki.path('birth_date').doValidate(null, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Loki.path('birth_date').doValidate(undefined, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Loki.path('birth_date').doValidate(new Date(), function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
-
-        done();
       });
 
       it('date not empty string (gh-3132)', function(done) {
@@ -359,22 +387,25 @@ describe('schema', function() {
       });
 
       it('objectid required', function(done) {
+        let remaining = 3;
         const Loki = new Schema({
           owner: { type: ObjectId, required: true }
         });
 
         Loki.path('owner').doValidate(new DocumentObjectId(), function(err) {
           assert.ifError(err);
+          --remaining || done();
         });
 
         Loki.path('owner').doValidate(null, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
 
         Loki.path('owner').doValidate(undefined, function(err) {
           assert.ok(err instanceof ValidatorError);
+          --remaining || done();
         });
-        done();
       });
 
       it('array required', function(done) {
@@ -534,6 +565,44 @@ describe('schema', function() {
           done();
         }, { a: 'b' });
       });
+
+      it('doValidateSync should ignore async function and script waiting for promises (gh-4885)', function(done) {
+        let asyncCalled = false;
+        let normalCalled = false;
+        let promiseCalled = false;
+        let promiseCompleted = false;
+
+        const schema = new Schema({
+          prop: {
+            type: Boolean,
+            validate: [
+              {
+                validator: async() => { asyncCalled = true; }
+              },
+              {
+                validator: () => { normalCalled = true; }
+              },
+              {
+                validator: () => {
+                  promiseCalled = true;
+                  return new Promise((res) => setTimeout(() => {
+                    promiseCompleted = true;
+                    return res();
+                  }, 1000));
+                }
+              }
+            ]
+          }
+        });
+
+        schema.path('prop').doValidateSync(true);
+
+        assert.strictEqual(asyncCalled, false);
+        assert.strictEqual(normalCalled, true);
+        assert.strictEqual(promiseCalled, true);
+        assert.strictEqual(promiseCompleted, false);
+        done();
+      });
     });
 
     describe('messages', function() {
@@ -554,7 +623,7 @@ describe('schema', function() {
 
           const A = mongoose.model('schema-validation-messages-' + random(), schema);
 
-          const a = new A;
+          const a = new A();
           a.validate(function(err) {
             assert.equal(err.errors.requiredString1, 'Path `requiredString1` is required.');
             assert.equal(err.errors.requiredString2, 'oops, requiredString2 is missing. required');
@@ -1164,7 +1233,7 @@ describe('schema', function() {
       });
     });
 
-    it('enums on arrays (gh-6102) (gh-8449)', function() {
+    it('enums on arrays (gh-6102) (gh-8449)', async function() {
       assert.throws(function() {
         new Schema({
           array: {
@@ -1195,10 +1264,10 @@ describe('schema', function() {
       Model = mongoose.model('gh6102', MySchema);
       const doc2 = new Model({ array: [1, 2, 3] });
 
-      return doc1.validate().
-        then(() => assert.ok(false), err => assert.equal(err.name, 'ValidationError')).
-        then(() => doc2.validate()).
-        then(() => assert.ok(false), err => assert.equal(err.name, 'ValidationError'));
+      let err = await doc1.validate().then(() => null, err => err);
+      assert.equal(err.name, 'ValidationError');
+      err = await doc2.validate().then(() => null, err => err);
+      assert.equal(err.name, 'ValidationError', err);
     });
 
     it('skips conditional required (gh-3539)', function(done) {
@@ -1258,6 +1327,34 @@ describe('schema', function() {
 
       m.validate(function(error) {
         assert.equal('fail 0', error.errors['n'].message);
+        done();
+      });
+    });
+
+    it('Allows for doc to be passed as another parameter (gh-12564)', function(done) {
+      let document = null;
+      const s = mongoose.Schema({
+        n: {
+          type: String,
+          validate: {
+            validator: function(v) {
+              return v != null;
+            },
+            message: function(properties, doc) {
+              document = doc;
+              return 'fail ' + properties.path + ' on doc ' + doc._id;
+            }
+          }
+        },
+        field: String
+      });
+      const M = mongoose.model('gh-12564', s);
+      const m = new M({ n: null, field: 'Yo' });
+
+      m.validate(function(error) {
+        assert.strictEqual(document, m);
+        assert.ok(error.errors['n'].message.includes(m._id));
+        assert.equal('fail n on doc ' + m._id, error.errors['n'].message);
         done();
       });
     });
@@ -1376,6 +1473,68 @@ describe('schema', function() {
         // Assert
         assert.ifError(err);
       });
+    });
+
+    it('should validate required UUID fields correctly (gh-12991)', function() {
+      const uuidSchema = new mongoose.Schema({
+        _id: { type: mongoose.Schema.Types.UUID, required: true },
+        name: { type: mongoose.Schema.Types.String, required: true }
+      });
+
+      const uuidRefSchema = new mongoose.Schema({
+        _id: { type: mongoose.Schema.Types.UUID, required: true },
+        uuidRef: { type: mongoose.Schema.Types.UUID, ref: 'UUIDModel', required: true },
+        uuidNonRef: { type: mongoose.Schema.Types.UUID, required: true },
+        uuidRefNonRequired: { type: mongoose.Schema.Types.UUID, ref: 'UUIDModel' },
+        name: { type: mongoose.Schema.Types.String, required: true }
+      });
+
+      const UUIDModel = mongoose.model('UUIDModel', uuidSchema, 'uuids');
+
+      const UUIDRefModel = mongoose.model('UUIDRefModel', uuidRefSchema, 'uuidRefs');
+
+      const uuid = new UUIDModel({ _id: uuidv4(), name: 'uuidName' });
+      assert.ifError(uuid.validateSync());
+
+      const uuidRef = new UUIDRefModel({
+        _id: uuidv4(),
+        uuidRef: uuidv4(),
+        uuidNonRef: uuidv4(),
+        uuidRefNonRequired: uuidv4(),
+        name: 'uuidRefName'
+      });
+      assert.ifError(uuidRef.validateSync());
+
+      const uuidRef2 = new UUIDRefModel({
+        _id: uuidv4(),
+        uuidNonRef: uuidv4(),
+        uuidRefNonRequired: uuidv4(),
+        name: 'uuidRefName'
+      });
+
+      const err2 = uuidRef2.validateSync();
+      assert.ok(err2);
+      assert.ok(err2.errors['uuidRef']);
+
+      const uuidRef3 = new UUIDRefModel({
+        _id: uuidv4(),
+        uuidRef: uuidv4(),
+        uuidRefNonRequired: uuidv4(),
+        name: 'uuidRefName'
+      });
+
+      const err3 = uuidRef3.validateSync();
+      assert.ok(err3);
+      assert.ok(err3.errors['uuidNonRef']);
+
+      const uuidRef4 = new UUIDRefModel({
+        _id: uuidv4(),
+        uuidRef: uuidv4(),
+        uuidNonRef: uuidv4(),
+        name: 'uuidRefName'
+      });
+
+      assert.ifError(uuidRef4.validateSync());
     });
   });
 });

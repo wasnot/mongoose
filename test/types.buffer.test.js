@@ -55,7 +55,7 @@ describe('types.buffer', function() {
   afterEach(() => require('./util').stopRemainingOps(db));
 
   it('test that a mongoose buffer behaves and quacks like a buffer', function() {
-    let a = new MongooseBuffer;
+    let a = new MongooseBuffer();
 
     assert.ok(a instanceof Buffer);
     assert.ok(a.isMongooseBuffer);
@@ -317,14 +317,14 @@ describe('types.buffer', function() {
         tj.required = Buffer.alloc(8);
         reset(tj);
         not(tj);
-        tj.required.writeDoubleLE(0xdeadbeefcafebabe, 0);
+        tj.required.writeDoubleLE(0xdeadbeefcafebabe, 0); // eslint-disable-line no-loss-of-precision
         is(tj);
       },
       writeDoubleBE: function() {
         tj.required = Buffer.alloc(8);
         reset(tj);
         not(tj);
-        tj.required.writeDoubleBE(0xdeadbeefcafebabe, 0);
+        tj.required.writeDoubleBE(0xdeadbeefcafebabe, 0); // eslint-disable-line no-loss-of-precision
         is(tj);
       },
       fill: function() {

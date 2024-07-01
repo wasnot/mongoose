@@ -3,11 +3,11 @@
 /**
  * Test dependencies.
  */
-
+const sinon = require('sinon');
 const start = require('./common');
 
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 const util = require('./util');
 
 const mongoose = start.mongoose;
@@ -20,7 +20,6 @@ const EmbeddedDocument = mongoose.Types.Subdocument;
 const MongooseError = mongoose.Error;
 
 describe('Model', function() {
-
   let db;
   let Comments;
   let BlogPost;
@@ -28,7 +27,7 @@ describe('Model', function() {
   beforeEach(() => db.deleteModel(/.*/));
 
   beforeEach(function() {
-    Comments = new Schema;
+    Comments = new Schema();
 
     Comments.add({
       title: String,
@@ -80,14 +79,14 @@ describe('Model', function() {
     db = start();
   });
 
-  after(function() {
-    db.close();
+  after(async function() {
+    await db.close();
   });
 
   afterEach(() => util.clearTestData(db));
   afterEach(() => require('./util').stopRemainingOps(db));
 
-  it('can be created using _id as embedded document', function(done) {
+  it('can be created using _id as embedded document', async function() {
     const Test = db.model('Test', Schema({
       _id: { first_name: String, age: Number },
       last_name: String,
@@ -95,6 +94,7 @@ describe('Model', function() {
         some: String
       }
     }));
+    await Test.deleteMany();
     const t = new Test({
       _id: {
         first_name: 'Daniel',
@@ -106,24 +106,20 @@ describe('Model', function() {
       }
     });
 
-    t.save(function(err) {
-      assert.ifError(err);
-      Test.findOne({}, function(err, doc) {
-        assert.ifError(err);
+    await t.save();
 
-        assert.ok('last_name' in doc);
-        assert.ok('_id' in doc);
-        assert.ok('first_name' in doc._id);
-        assert.equal(doc._id.first_name, 'Daniel');
-        assert.ok('age' in doc._id);
-        assert.equal(doc._id.age, 21);
+    const doc = await Test.findOne();
 
-        assert.ok('doc_embed' in doc);
-        assert.ok('some' in doc.doc_embed);
-        assert.equal(doc.doc_embed.some, 'a');
-        done();
-      });
-    });
+    assert.ok('last_name' in doc);
+    assert.ok('_id' in doc);
+    assert.ok('first_name' in doc._id);
+    assert.equal(doc._id.first_name, 'Daniel');
+    assert.ok('age' in doc._id);
+    assert.equal(doc._id.age, 21);
+
+    assert.ok('doc_embed' in doc);
+    assert.ok('some' in doc.doc_embed);
+    assert.equal(doc.doc_embed.some, 'a');
   });
 
   describe('constructor', function() {
@@ -146,7 +142,7 @@ describe('Model', function() {
   });
   describe('isNew', function() {
     it('is true on instantiation', function(done) {
-      const post = new BlogPost;
+      const post = new BlogPost();
       assert.equal(post.isNew, true);
       done();
     });
@@ -190,7 +186,7 @@ describe('Model', function() {
 
   describe('structure', function() {
     it('default when instantiated', function(done) {
-      const post = new BlogPost;
+      const post = new BlogPost();
       assert.equal(post.db.model('BlogPost').modelName, 'BlogPost');
       assert.equal(post.constructor.modelName, 'BlogPost');
 
@@ -223,7 +219,7 @@ describe('Model', function() {
             single: { type: Array, cast: String, default: ['a'] }
           });
           const DefaultArray = db.model('Test', DefaultArraySchema);
-          const arr = new DefaultArray;
+          const arr = new DefaultArray();
           assert.equal(arr.get('arr').length, 3);
           assert.equal(arr.get('arr')[0], 'a');
           assert.equal(arr.get('arr')[1], 'b');
@@ -312,16 +308,16 @@ describe('Model', function() {
         post.init({
           title: 'Test',
           slug: 'test',
-          date: new Date,
+          date: new Date(),
           meta: {
-            date: new Date,
+            date: new Date(),
             visitors: 5
           },
           published: true,
-          owners: [new DocumentObjectId, new DocumentObjectId],
+          owners: [new DocumentObjectId(), new DocumentObjectId()],
           comments: [
-            { title: 'Test', date: new Date, body: 'Test' },
-            { title: 'Super', date: new Date, body: 'Cool' }
+            { title: 'Test', date: new Date(), body: 'Test' },
+            { title: 'Super', date: new Date(), body: 'Cool' }
           ]
         });
 
@@ -360,11 +356,11 @@ describe('Model', function() {
       });
 
       it('partially', function(done) {
-        const post = new BlogPost;
+        const post = new BlogPost();
         post.init({
           title: 'Test',
           slug: 'test',
-          date: new Date
+          date: new Date()
         });
 
         assert.equal(post.get('title'), 'Test');
@@ -385,7 +381,7 @@ describe('Model', function() {
       it('with partial hash', function(done) {
         const post = new BlogPost({
           meta: {
-            date: new Date,
+            date: new Date(),
             visitors: 5
           }
         });
@@ -399,7 +395,7 @@ describe('Model', function() {
         post.init({
           title: 'Test',
           slug: 'test',
-          comments: [{ title: 'Test', date: new Date, body: 'Test' }]
+          comments: [{ title: 'Test', date: new Date(), body: 'Test' }]
         });
 
         assert.equal(post.get('comments')[0].isNew, false);
@@ -521,7 +517,7 @@ describe('Model', function() {
     });
 
     const M = db.model('Test', schema);
-    const m = new M;
+    const m = new M();
     m.nested = null;
     m.save(function(err) {
       assert.ifError(err);
@@ -566,7 +562,7 @@ describe('Model', function() {
   it('over-writing a number should persist to the db (gh-342)', function(done) {
     const post = new BlogPost({
       meta: {
-        date: new Date,
+        date: new Date(),
         visitors: 10
       }
     });
@@ -605,7 +601,7 @@ describe('Model', function() {
       const ChildA = db.model('Child', ChildSchema);
       const ParentA = db.model('Parent', ParentSchema);
 
-      const c = new ChildA;
+      const c = new ChildA();
       assert.equal(typeof c.talk, 'function');
 
       const p = new ParentA();
@@ -660,8 +656,8 @@ describe('Model', function() {
         assert.ok(err instanceof MongooseError);
         assert.ok(err instanceof ValidationError);
         assert.equal(Object.keys(err.errors).length, 2);
-        post.date = new Date;
-        post.meta.date = new Date;
+        post.date = new Date();
+        post.meta.date = new Date();
         post.save(function(err) {
           assert.ifError(err);
           done();
@@ -671,7 +667,7 @@ describe('Model', function() {
     it('nested error', function(done) {
       let threw = false;
 
-      const post = new BlogPost;
+      const post = new BlogPost();
 
       try {
         post.init({
@@ -705,7 +701,7 @@ describe('Model', function() {
       const post = new BlogPost({
         title: 'Test',
         slug: 'test',
-        comments: [{ title: 'Test', date: new Date, body: 'Test' }]
+        comments: [{ title: 'Test', date: new Date(), body: 'Test' }]
       });
 
       post.get('comments')[0].set('date', 'invalid');
@@ -863,7 +859,7 @@ describe('Model', function() {
 
       const M = db.model('Test', S);
 
-      const m = new M;
+      const m = new M();
       m.save(function(err) {
         assert.ifError(err);
         M.findById(m._id, function(err, m) {
@@ -965,7 +961,7 @@ describe('Model', function() {
         simple: { type: String, required: true }
       }));
 
-      const post = new TestUndefinedValidation;
+      const post = new TestUndefinedValidation();
 
       post.save(function(err) {
         assert.ok(err instanceof MongooseError);
@@ -1024,7 +1020,7 @@ describe('Model', function() {
         resultv: { type: String, required: true }
       }));
 
-      const post = new TestV;
+      const post = new TestV();
 
       post.validate(function(err) {
         assert.ok(err instanceof MongooseError);
@@ -1151,7 +1147,7 @@ describe('Model', function() {
         item: { type: String, required: true }
       }));
 
-      const post = new TestCallingValidation;
+      const post = new TestCallingValidation();
 
       assert.equal(post.schema.path('item').isRequired, true);
       assert.strictEqual(post.isNew, true);
@@ -1179,7 +1175,7 @@ describe('Model', function() {
         result: { type: String, validate: [validator, 'chump validator'], required: false }
       }));
 
-      const post = new TestV;
+      const post = new TestV();
 
       assert.equal(post.schema.path('result').isRequired, false);
       done();
@@ -1333,7 +1329,7 @@ describe('Model', function() {
         date: { type: Date, default: now }
       }));
 
-      const post = new TestDefaults;
+      const post = new TestDefaults();
       assert.ok(post.get('date') instanceof Date);
       assert.equal(+post.get('date'), now);
       done();
@@ -1705,7 +1701,7 @@ describe('Model', function() {
       assert.equal(a.$__getValue('number').valueOf(), 50);
 
       called = false;
-      const b = new A;
+      const b = new A();
       b.init({ number: 50 });
       assert.equal(called, false);
       num = b.number;
@@ -1742,7 +1738,7 @@ describe('Model', function() {
       });
 
       it('works with object literals', function(done) {
-        const date = new Date;
+        const date = new Date();
 
         const meta = {
           date: date,
@@ -1775,7 +1771,7 @@ describe('Model', function() {
         assert.equal(getter2.visitors, 5);
         assert.equal(getter1.date, getter2.date);
 
-        post.meta.date = new Date - 1000;
+        post.meta.date = new Date() - 1000;
         assert.ok(post.meta.date instanceof Date);
         assert.ok(post.get('meta').date instanceof Date);
 
@@ -2058,7 +2054,7 @@ describe('Model', function() {
       let totalDocs = 4;
       const saveQueue = [];
 
-      const post = new BlogPost;
+      const post = new BlogPost();
 
       function complete() {
         BlogPost.findOne({ _id: post.get('_id') }, function(err, doc) {
@@ -2734,7 +2730,7 @@ describe('Model', function() {
 
         BlogPost.findById(post.get('_id'), function(err, doc) {
           assert.ifError(err);
-          assert.strictEqual(doc.comments.id(new DocumentObjectId), null);
+          assert.strictEqual(doc.comments.id(new DocumentObjectId()), null);
           done();
         });
       });
@@ -2855,7 +2851,7 @@ describe('Model', function() {
 
           // date
           const post3 = new BlogPost();
-          post3.mixed = new Date;
+          post3.mixed = new Date();
           post3.save(function(err) {
             assert.ifError(err);
 
@@ -2909,7 +2905,7 @@ describe('Model', function() {
       x: { y: { type: { type: String }, owner: String } }
     }));
 
-    post = new TestDefaults2;
+    post = new TestDefaults2();
     post.x.y.type = '#402';
     post.x.y.owner = 'me';
     post.save(function(err) {
@@ -3157,6 +3153,28 @@ describe('Model', function() {
           assert.ok(save);
           done();
         });
+      });
+
+      it('callback should receive parameter of type document after bulkSave (gh-13026)', async function() {
+        const schema = new Schema({
+          foo: Boolean,
+          bar: Boolean
+        });
+
+        schema.post('save', function(doc) {
+          assert.deepEqual(this, doc);
+        });
+
+        const Test = db.model('Test', schema);
+
+        await Test.create({
+          foo: true,
+          bar: true
+        });
+
+        const tests = await Test.find();
+        tests.forEach(t => t.foo = false);
+        await Test.bulkSave(tests);
       });
     });
   });
@@ -3521,7 +3539,7 @@ describe('Model', function() {
       it('should emit error on its Model when there are listeners', function(done) {
         const DefaultErrSchema = new Schema({});
         DefaultErrSchema.pre('save', function(next) {
-          next(new Error);
+          next(new Error());
         });
 
         const DefaultErr = db.model('Test', DefaultErrSchema);
@@ -3561,7 +3579,7 @@ describe('Model', function() {
     it('rejects new documents that have no _id set (1595)', function(done) {
       const s = new Schema({ _id: { type: String } });
       const B = db.model('Test', s);
-      const b = new B;
+      const b = new B();
       b.save(function(err) {
         assert.ok(err);
         assert.ok(/must have an _id/.test(err));
@@ -3723,31 +3741,26 @@ describe('Model', function() {
     });
 
     it('with positional notation on path not existing in schema (gh-1048)', function(done) {
-      const db = start();
-
       const M = db.model('Test', Schema({ name: 'string' }));
-      db.on('open', function() {
-        const o = {
-          name: 'gh-1048',
-          _id: new mongoose.Types.ObjectId,
-          databases: {
-            0: { keys: 100, expires: 0 },
-            15: { keys: 1, expires: 0 }
-          }
-        };
+      const o = {
+        name: 'gh-1048',
+        _id: new mongoose.Types.ObjectId(),
+        databases: {
+          0: { keys: 100, expires: 0 },
+          15: { keys: 1, expires: 0 }
+        }
+      };
 
-        M.collection.insertOne(o, function(err) {
+      M.updateOne({ _id: o._id }, o, { upsert: true, strict: false }, function(err) {
+        assert.ifError(err);
+        M.findById(o._id, function(err, doc) {
           assert.ifError(err);
-          M.findById(o._id, function(err, doc) {
-            db.close();
-            assert.ifError(err);
-            assert.ok(doc);
-            assert.ok(doc._doc.databases);
-            assert.ok(doc._doc.databases['0']);
-            assert.ok(doc._doc.databases['15']);
-            assert.equal(doc.databases, undefined);
-            done();
-          });
+          assert.ok(doc);
+          assert.ok(doc._doc.databases);
+          assert.ok(doc._doc.databases['0']);
+          assert.ok(doc._doc.databases['15']);
+          assert.equal(doc.databases, undefined);
+          done();
         });
       });
     });
@@ -3757,7 +3770,7 @@ describe('Model', function() {
     it('are not saved', function(done) {
       const B = BlogPost;
 
-      const b = new B;
+      const b = new B();
       b.whateveriwant = 10;
       b.save(function(err) {
         assert.ifError(err);
@@ -3882,7 +3895,7 @@ describe('Model', function() {
 
   it('setting a path to undefined should retain the value as undefined', function(done) {
     const B = BlogPost;
-    const doc = new B;
+    const doc = new B();
     doc.title = 'css3';
     assert.equal(doc.$__delta()[1].$set.title, 'css3');
     doc.title = undefined;
@@ -3892,7 +3905,7 @@ describe('Model', function() {
     doc.title = 'css3';
     doc.author = 'aaron';
     doc.numbers = [3, 4, 5];
-    doc.meta.date = new Date;
+    doc.meta.date = new Date();
     doc.meta.visitors = 89;
     doc.comments = [{ title: 'thanksgiving', body: 'yuuuumm' }];
     doc.comments.push({ title: 'turkey', body: 'cranberries' });
@@ -4031,7 +4044,7 @@ describe('Model', function() {
         loc: loc
       });
 
-
+      await Person.init();
       await Person.createIndexes();
 
       await p.save();
@@ -4057,7 +4070,7 @@ describe('Model', function() {
         name: 'Jimmy Page'
       });
 
-
+      await Person.init();
       await Person.createIndexes();
 
       await p.save();
@@ -4088,8 +4101,13 @@ describe('Model', function() {
 
       p.nested.tag = 'guitarist';
 
-
-      await Person.collection.drop();
+      await Person.collection.drop().catch(err => {
+        if (err.codeName === 'NamespaceNotFound') {
+          return;
+        }
+        throw err;
+      });
+      await Person.createCollection();
       await Person.createIndexes();
 
       await p.save();
@@ -4139,8 +4157,12 @@ describe('Model', function() {
         name: 'Jimmy Page'
       });
 
-
-      await Person.collection.drop();
+      await Person.collection.drop().catch(err => {
+        if (err.codeName === 'NamespaceNotFound') {
+          return;
+        }
+        throw err;
+      });
       await Person.createIndexes();
 
       await p.save();
@@ -4174,7 +4196,12 @@ describe('Model', function() {
       });
 
 
-      await Person.collection.drop();
+      await Person.collection.drop().catch(err => {
+        if (err.codeName === 'NamespaceNotFound') {
+          return;
+        }
+        throw err;
+      });
       await Person.createIndexes();
 
       let err;
@@ -4201,8 +4228,12 @@ describe('Model', function() {
         name: 'Jimmy Page'
       });
 
-
-      await Person.collection.drop();
+      await Person.collection.drop().catch(err => {
+        if (err.codeName === 'NamespaceNotFound') {
+          return;
+        }
+        throw err;
+      });
       await Person.createIndexes();
 
       await p.save();
@@ -4229,7 +4260,12 @@ describe('Model', function() {
       });
 
 
-      await Person.collection.drop();
+      await Person.collection.drop().catch(err => {
+        if (err.codeName === 'NamespaceNotFound') {
+          return;
+        }
+        throw err;
+      });
       await Person.createIndexes();
 
       await p.save();
@@ -4310,40 +4346,118 @@ describe('Model', function() {
     });
   });
 
-  it('save max bson size error with buffering (gh-3906)', async function() {
-    this.timeout(10000);
-    const db = start({ noErrorListener: true });
-    const Test = db.model('Test', { name: Object });
+  describe('max bson size error', function() {
+    let db;
 
-    const test = new Test({
-      name: {
-        data: (new Array(16 * 1024 * 1024)).join('x')
+    afterEach(async() => {
+      if (db != null) {
+        await db.close();
+        db = null;
       }
     });
 
-    const error = await test.save().then(() => null, err => err);
+    it('save max bson size error with buffering (gh-3906)', async function() {
+      this.timeout(10000);
+      db = start({ noErrorListener: true });
+      const Test = db.model('Test', { name: Object });
 
-    assert.ok(error);
-    assert.equal(error.name, 'MongoServerError');
-    await db.close();
+      const test = new Test({
+        name: {
+          data: (new Array(16 * 1024 * 1024)).join('x')
+        }
+      });
+
+      const error = await test.save().then(() => null, err => err);
+
+      assert.ok(error);
+      assert.equal(error.name, 'MongoServerError');
+    });
+
+    it('reports max bson size error in save (gh-3906)', async function() {
+      this.timeout(10000);
+      db = await start({ noErrorListener: true });
+      const Test = db.model('Test', { name: Object });
+
+      const test = new Test({
+        name: {
+          data: (new Array(16 * 1024 * 1024)).join('x')
+        }
+      });
+
+      const error = await test.save().then(() => null, err => err);
+
+      assert.ok(error);
+      assert.equal(error.name, 'MongoServerError');
+    });
   });
 
-  it('reports max bson size error in save (gh-3906)', async function() {
-    this.timeout(10000);
-    const db = await start({ noErrorListener: true });
-    const Test = db.model('Test', { name: Object });
+  describe('insertMany()', function() {
+    it('with timestamps (gh-723)', function() {
+      const schema = new Schema({ name: String }, { timestamps: true });
+      const Movie = db.model('Movie', schema);
+      const start = Date.now();
 
-    const test = new Test({
-      name: {
-        data: (new Array(16 * 1024 * 1024)).join('x')
-      }
+      const arr = [{ name: 'Star Wars' }, { name: 'The Empire Strikes Back' }];
+      return Movie.insertMany(arr).
+        then(docs => {
+          assert.equal(docs.length, 2);
+          assert.ok(!docs[0].isNew);
+          assert.ok(!docs[1].isNew);
+          assert.ok(docs[0].createdAt.valueOf() >= start);
+          assert.ok(docs[1].createdAt.valueOf() >= start);
+        }).
+        then(() => Movie.find()).
+        then(docs => {
+          assert.equal(docs.length, 2);
+          assert.ok(docs[0].createdAt.valueOf() >= start);
+          assert.ok(docs[1].createdAt.valueOf() >= start);
+        });
     });
 
-    const error = await test.save().then(() => null, err => err);
+    it('timestamps respect $timestamps() (gh-12117)', async function() {
+      const schema = new Schema({ name: String }, { timestamps: true });
+      const Movie = db.model('Movie', schema);
+      const start = Date.now();
 
-    assert.ok(error);
-    assert.equal(error.name, 'MongoServerError');
-    await db.close();
+      const arr = [
+        new Movie({ name: 'Star Wars' }),
+        new Movie({ name: 'The Empire Strikes Back' })
+      ];
+      arr[1].$timestamps(false);
+
+      await Movie.insertMany(arr);
+      const docs = await Movie.find().sort({ name: 1 });
+      assert.ok(docs[0].createdAt.valueOf() >= start);
+      assert.ok(!docs[1].createdAt);
+    });
+
+    it('insertMany() with nested timestamps (gh-12060)', async function() {
+      const childSchema = new Schema({ name: { type: String } }, {
+        _id: false,
+        timestamps: true
+      });
+
+      const parentSchema = new Schema({ child: childSchema }, {
+        timestamps: true
+      });
+
+      const Test = db.model('Test', parentSchema);
+
+      await Test.insertMany([{ child: { name: 'test' } }]);
+      let docs = await Test.find();
+
+      assert.equal(docs.length, 1);
+      assert.equal(docs[0].child.name, 'test');
+      assert.ok(docs[0].child.createdAt);
+      assert.ok(docs[0].child.updatedAt);
+
+      await Test.insertMany([{ child: { name: 'test2' } }], { timestamps: false });
+      docs = await Test.find({ 'child.name': 'test2' });
+      assert.equal(docs.length, 1);
+      assert.equal(docs[0].child.name, 'test2');
+      assert.ok(!docs[0].child.createdAt);
+      assert.ok(!docs[0].child.updatedAt);
+    });
   });
 
   describe('bug fixes', function() {
@@ -4456,6 +4570,11 @@ describe('Model', function() {
       const error = await Movie.insertMany(arr, { ordered: false }).then(() => null, err => err);
 
       assert.equal(error.message.indexOf('E11000'), 0);
+      assert.equal(error.results.length, 3);
+      assert.equal(error.results[0].name, 'Star Wars');
+      assert.ok(error.results[1].err);
+      assert.ok(error.results[1].err.errmsg.includes('E11000'));
+      assert.equal(error.results[2].name, 'The Empire Strikes Back');
       const docs = await Movie.find({}).sort({ name: 1 }).exec();
 
       assert.equal(docs.length, 2);
@@ -4563,6 +4682,11 @@ describe('Model', function() {
       assert.equal(err.insertedDocs[0].code, 'test');
       assert.equal(err.insertedDocs[1].code, 'HARD');
 
+      assert.equal(err.results.length, 3);
+      assert.ok(err.results[0].err.errmsg.includes('E11000'));
+      assert.equal(err.results[1].code, 'test');
+      assert.equal(err.results[2].code, 'HARD');
+
       await Question.deleteMany({});
       await Question.create({ code: 'MEDIUM', text: '123' });
       await Question.create({ code: 'HARD', text: '123' });
@@ -4638,28 +4762,6 @@ describe('Model', function() {
       });
     });
 
-    it('insertMany() with timestamps (gh-723)', function() {
-      const schema = new Schema({ name: String }, { timestamps: true });
-      const Movie = db.model('Movie', schema);
-      const start = Date.now();
-
-      const arr = [{ name: 'Star Wars' }, { name: 'The Empire Strikes Back' }];
-      return Movie.insertMany(arr).
-        then(docs => {
-          assert.equal(docs.length, 2);
-          assert.ok(!docs[0].isNew);
-          assert.ok(!docs[1].isNew);
-          assert.ok(docs[0].createdAt.valueOf() >= start);
-          assert.ok(docs[1].createdAt.valueOf() >= start);
-        }).
-        then(() => Movie.find()).
-        then(docs => {
-          assert.equal(docs.length, 2);
-          assert.ok(docs[0].createdAt.valueOf() >= start);
-          assert.ok(docs[1].createdAt.valueOf() >= start);
-        });
-    });
-
     it('returns empty array if no documents (gh-8130)', function() {
       const Movie = db.model('Movie', Schema({ name: String }));
       return Movie.insertMany([]).then(docs => assert.deepEqual(docs, []));
@@ -4723,6 +4825,80 @@ describe('Model', function() {
         assert.equal(error, null);
         done();
       });
+    });
+
+    it('insertMany() validation error with ordered false and rawResult for checking which documents failed (gh-12791)', async function() {
+      const schema = new Schema({
+        name: { type: String, required: true },
+        year: { type: Number, required: true }
+      });
+      const Movie = db.model('Movie', schema);
+
+      const id1 = new mongoose.Types.ObjectId();
+      const id2 = new mongoose.Types.ObjectId();
+      const id3 = new mongoose.Types.ObjectId();
+      const arr = [
+        { _id: id1, foo: 'The Phantom Menace', year: 1999 },
+        { _id: id2, name: 'The Force Awakens', bar: 2015 },
+        { _id: id3, name: 'The Empire Strikes Back', year: 1980 }
+      ];
+      const opts = { ordered: false, rawResult: true };
+      const res = await Movie.insertMany(arr, opts);
+      // {
+      //   acknowledged: true,
+      //   insertedCount: 1,
+      //   insertedIds: { '0': new ObjectId("63b34b062cfe38622738e510") },
+      //   mongoose: { validationErrors: [ [Error], [Error] ] }
+      // }
+      assert.equal(res.insertedCount, 1);
+      assert.equal(res.insertedIds[0].toHexString(), id3.toHexString());
+      assert.equal(res.mongoose.validationErrors.length, 2);
+      assert.ok(res.mongoose.validationErrors[0].errors['name']);
+      assert.ok(!res.mongoose.validationErrors[0].errors['year']);
+      assert.ok(res.mongoose.validationErrors[1].errors['year']);
+      assert.ok(!res.mongoose.validationErrors[1].errors['name']);
+
+      assert.equal(res.mongoose.results.length, 3);
+      assert.ok(res.mongoose.results[0].errors['name']);
+      assert.ok(res.mongoose.results[1].errors['year']);
+      assert.ok(res.mongoose.results[2].$__);
+      assert.equal(res.mongoose.results[2].name, 'The Empire Strikes Back');
+    });
+
+    it('insertMany() validation error with ordered false and rawResult for mixed write and validation error (gh-12791)', async function() {
+      const schema = new Schema({
+        name: { type: String, required: true, unique: true },
+        year: { type: Number, required: true }
+      });
+      const Movie = db.model('Movie', schema);
+      await Movie.init();
+
+      const arr = [
+        { foo: 'The Phantom Menace', year: 1999 },
+        { name: 'The Force Awakens', bar: 2015 },
+        { name: 'The Empire Strikes Back', year: 1980 },
+        { name: 'The Empire Strikes Back', year: 1980 }
+      ];
+      const opts = { ordered: false, rawResult: true };
+      const err = await Movie.insertMany(arr, opts).then(() => null, err => err);
+
+      assert.ok(err);
+      assert.equal(err.insertedDocs.length, 1);
+      assert.equal(err.insertedDocs[0].name, 'The Empire Strikes Back');
+      assert.equal(err.writeErrors.length, 1);
+      assert.equal(err.writeErrors[0].index, 3);
+      assert.equal(err.mongoose.validationErrors.length, 2);
+      assert.ok(err.mongoose.validationErrors[0].errors['name']);
+      assert.ok(!err.mongoose.validationErrors[0].errors['year']);
+      assert.ok(err.mongoose.validationErrors[1].errors['year']);
+      assert.ok(!err.mongoose.validationErrors[1].errors['name']);
+
+      assert.equal(err.mongoose.results.length, 4);
+      assert.ok(err.mongoose.results[0].errors['name']);
+      assert.ok(err.mongoose.results[1].errors['year']);
+      assert.ok(err.mongoose.results[2].$__);
+      assert.equal(err.mongoose.results[2].name, 'The Empire Strikes Back');
+      assert.ok(err.mongoose.results[3].err);
     });
 
     it('insertMany() populate option (gh-9720)', async function() {
@@ -5116,89 +5292,133 @@ describe('Model', function() {
       });
 
       describe('watch()', function() {
+        this.timeout(10000);
+        let changeStream;
+        let listener;
+
         before(function() {
           if (!process.env.REPLICA_SET) {
             this.skip();
           }
         });
 
-        it('watch() (gh-5964)', async function() {
+        afterEach(() => {
+          if (listener == null) {
+            return;
+          }
+          changeStream.removeListener('change', listener);
+          listener = null;
+          changeStream.close();
+          changeStream = null;
+        });
 
+        it('watch() (gh-5964)', async function() {
+          const MyModel = db.model('Test', new Schema({ name: String }));
+
+          const changed = new global.Promise(resolve => {
+            changeStream = MyModel.watch();
+            listener = data => resolve(data);
+            changeStream.once('change', listener);
+          });
+
+          const doc = await MyModel.create({ name: 'Ned Stark' });
+
+          const changeData = await changed;
+          assert.equal(changeData.operationType, 'insert');
+          assert.equal(changeData.fullDocument._id.toHexString(),
+            doc._id.toHexString());
+        });
+
+        it('using next() and hasNext() (gh-11527)', async function() {
+          const MyModel = db.model('Test', new Schema({ name: String }));
+
+          const changeStream = await MyModel.watch();
+
+          const p = Promise.all([changeStream.next(), changeStream.hasNext()]);
+          const doc = await MyModel.create({ name: 'Ned Stark' });
+
+          const [changeData] = await p;
+          assert.equal(changeData.operationType, 'insert');
+          assert.equal(changeData.fullDocument._id.toHexString(),
+            doc._id.toHexString());
+        });
+
+        it('fullDocument (gh-11936)', async function() {
+          const MyModel = db.model('Test', new Schema({ name: String }));
+
+          const changeStream = await MyModel.watch([], {
+            fullDocument: 'updateLookup',
+            hydrate: true
+          });
+
+          const doc = await MyModel.create({ name: 'Ned Stark' });
+
+          const p = changeStream.next();
+          await MyModel.updateOne({ _id: doc._id }, { name: 'Tony Stark' });
+
+          const changeData = await p;
+          assert.equal(changeData.operationType, 'update');
+          assert.equal(changeData.fullDocument._id.toHexString(),
+            doc._id.toHexString());
+          assert.ok(changeData.fullDocument.$__);
+          assert.equal(changeData.fullDocument.get('name'), 'Tony Stark');
+        });
+
+        it('fullDocument with immediate watcher and hydrate (gh-14049)', async function() {
           const MyModel = db.model('Test', new Schema({ name: String }));
 
           const doc = await MyModel.create({ name: 'Ned Stark' });
 
-          const changed = new global.Promise(resolve => {
-            MyModel.watch().once('change', data => resolve(data));
-          });
-
-          await doc.remove();
-
-          const changeData = await changed;
-          assert.equal(changeData.operationType, 'delete');
-          assert.equal(changeData.documentKey._id.toHexString(),
-            doc._id.toHexString());
-
-        });
-
-        it('watch() before connecting (gh-5964)', async function() {
-
-          const db = start();
-
-          const MyModel = db.model('Test', new Schema({ name: String }));
-
-          // Synchronous, before connection happens
-          const changeStream = MyModel.watch();
-          const changed = new global.Promise(resolve => {
-            changeStream.once('change', data => resolve(data));
-          });
-
-          await db;
-          await MyModel.create({ name: 'Ned Stark' });
-
-          const changeData = await changed;
-          assert.equal(changeData.operationType, 'insert');
-          assert.equal(changeData.fullDocument.name, 'Ned Stark');
-
-        });
-
-        it('watch() close() prevents buffered watch op from running (gh-7022)', async function() {
-
-          const db = start();
-          const MyModel = db.model('Test', new Schema({}));
-          const changeStream = MyModel.watch();
-          const ready = new global.Promise(resolve => {
-            changeStream.once('ready', () => {
-              resolve(true);
+          const p = new Promise((resolve) => {
+            MyModel.watch([], {
+              fullDocument: 'updateLookup',
+              hydrate: true
+            }).on('change', change => {
+              resolve(change);
             });
-            setTimeout(resolve, 500, false);
           });
 
-          changeStream.close();
-          await db;
-          const readyCalled = await ready;
-          assert.strictEqual(readyCalled, false);
+          await MyModel.updateOne({ _id: doc._id }, { name: 'Tony Stark' });
 
+          const changeData = await p;
+          assert.equal(changeData.operationType, 'update');
+          assert.equal(changeData.fullDocument._id.toHexString(),
+            doc._id.toHexString());
+          assert.ok(changeData.fullDocument.$__);
+          assert.equal(changeData.fullDocument.get('name'), 'Tony Stark');
         });
 
-        it('watch() close() closes the stream (gh-7022)', async function() {
+        it('respects discriminators (gh-11007)', async function() {
+          const BaseModel = db.model('Test', new Schema({ name: String }));
+          const ChildModel = BaseModel.discriminator('Test1', new Schema({ email: String }));
 
-          const db = await start();
-          const MyModel = db.model('Test', new Schema({ name: String }));
-
-          await MyModel.init();
-
-          const changeStream = MyModel.watch();
-          const closed = new global.Promise(resolve => {
-            changeStream.once('close', () => resolve(true));
+          const changed = new global.Promise(resolve => {
+            changeStream = ChildModel.watch();
+            listener = data => resolve(data);
+            changeStream.once('change', listener);
           });
 
-          await MyModel.create({ name: 'Hodor' });
+          await BaseModel.create({ name: 'Base' });
+          await ChildModel.create({ name: 'Child', email: 'test' });
 
-          changeStream.close();
-          const closedData = await closed;
-          assert.strictEqual(closedData, true);
+          const changeData = await changed;
+          // Should get change data from 2nd insert, skipping first insert
+          assert.equal(changeData.operationType, 'insert');
+          assert.equal(changeData.fullDocument.name, 'Child');
+        });
 
+        it('bubbles up resumeTokenChanged events (gh-14349)', async function() {
+          const MyModel = db.model('Test', new Schema({ name: String }));
+
+          const resumeTokenChangedEvent = new Promise(resolve => {
+            changeStream = MyModel.watch();
+            listener = data => resolve(data);
+            changeStream.once('resumeTokenChanged', listener);
+          });
+
+          await MyModel.create({ name: 'test' });
+          const { _data } = await resumeTokenChangedEvent;
+          assert.ok(_data);
         });
       });
 
@@ -5233,7 +5453,6 @@ describe('Model', function() {
         });
 
         it('startSession() before connecting', async function() {
-
           const db = start();
 
           const MyModel = db.model('Test', new Schema({ name: String }));
@@ -5249,6 +5468,7 @@ describe('Model', function() {
 
           session.endSession();
 
+          await db.close();
         });
 
         it('sets session when pulling a document from db', async function() {
@@ -5828,6 +6048,69 @@ describe('Model', function() {
           }
         }]);
       });
+
+      it('sends valid ops if ordered = false (gh-13176)', async function() {
+        const testSchema = new mongoose.Schema({
+          num: Number
+        });
+        const Test = db.model('Test', testSchema);
+
+        const res = await Test.bulkWrite([
+          {
+            updateOne: {
+              filter: {},
+              update: { $set: { num: 'not a number' } },
+              upsert: true
+            }
+          },
+          {
+            updateOne: {
+              filter: {},
+              update: { $set: { num: 42 } }
+            }
+          }
+        ], { ordered: false });
+        assert.ok(res.mongoose);
+        assert.equal(res.mongoose.validationErrors.length, 1);
+        assert.strictEqual(res.result.nUpserted, 0);
+      });
+
+      it('decorates write error with validation errors if unordered fails (gh-13176)', async function() {
+        const testSchema = new mongoose.Schema({
+          num: Number
+        });
+        const Test = db.model('Test', testSchema);
+
+        await Test.deleteMany({});
+        const { _id } = await Test.create({ num: 42 });
+
+        const err = await Test.bulkWrite([
+          {
+            updateOne: {
+              filter: {},
+              update: { $set: { num: 'not a number' } },
+              upsert: true
+            }
+          },
+          {
+            updateOne: {
+              filter: {},
+              update: { $push: { num: 42 } }
+            }
+          },
+          {
+            updateOne: {
+              filter: {},
+              update: { $inc: { num: 57 } }
+            }
+          }
+        ], { ordered: false }).then(() => null, err => err);
+        assert.ok(err);
+        assert.equal(err.mongoose.validationErrors.length, 1);
+
+        const { num } = await Test.findById(_id);
+        assert.equal(num, 99);
+      });
     });
 
     it('insertMany with Decimal (gh-5190)', async function() {
@@ -5886,7 +6169,7 @@ describe('Model', function() {
 
     it.skip('save() with wtimeout defined in schema (gh-6862)', function(done) {
       // If you want to test this, setup replica set with 1 primary up and 1 secondary down
-      this.timeout(process.env.TRAVIS ? 9000 : 5500);
+      this.timeout(5500);
       const schema = new Schema({
         name: String
       }, {
@@ -5913,7 +6196,7 @@ describe('Model', function() {
 
     it.skip('save with wtimeout in options (gh_6862)', function(done) {
       // If you want to test this, setup replica set with 1 primary up and 1 secondary down
-      this.timeout(process.env.TRAVIS ? 9000 : 5500);
+      this.timeout(5500);
       const schema = new Schema({
         name: String
       });
@@ -6103,148 +6386,572 @@ describe('Model', function() {
         counter();
       });
     });
+    describe('Model.syncIndexes()', () => {
+      it('adds indexes to the collection', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          { name: { type: String, index: true } },
+          { autoIndex: false }
+        );
+        const User = db.model('User', userSchema, collectionName);
 
-    it('syncIndexes() (gh-6281)', async function() {
-      this.timeout(10000);
+        // Act
+        await User.syncIndexes();
 
-
-      const coll = 'tests' + random();
-      let M = db.model('Test', new Schema({
-        name: { type: String, index: true }
-      }, { autoIndex: false }), coll);
-      let dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, []);
-
-      let indexes = await M.listIndexes();
-      assert.deepEqual(indexes.map(i => i.key), [
-        { _id: 1 },
-        { name: 1 }
-      ]);
-
-      // New model, same collection, index on different property
-      db.deleteModel(/Test/);
-      M = db.model('Test', new Schema({
-        otherName: { type: String, index: true }
-      }, { autoIndex: false }), coll);
-
-      dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, ['name_1']);
-
-      indexes = await M.listIndexes();
-      assert.deepEqual(indexes.map(i => i.key), [
-        { _id: 1 },
-        { otherName: 1 }
-      ]);
-
-      // New model, same collection, different options
-      db.deleteModel(/Test/);
-      M = db.model('Test', new Schema({
-        otherName: { type: String, unique: true }
-      }, { autoIndex: false }), coll);
-
-      dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, ['otherName_1']);
-
-      indexes = await M.listIndexes();
-      assert.deepEqual(indexes.map(i => i.key), [
-        { _id: 1 },
-        { otherName: 1 }
-      ]);
-
-      // Re-run syncIndexes(), shouldn't change anything
-      dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, []);
-
-      await M.collection.drop();
-
-    });
-
-    it('syncIndexes() with different key order (gh-8135)', async function() {
-      this.timeout(10000);
-
-
-      const opts = { autoIndex: false };
-      let schema = new Schema({ name: String, age: Number }, opts);
-      schema.index({ name: 1, age: -1 });
-
-      const coll = 'tests' + random();
-      let M = db.model('Test', schema, coll);
-
-      let dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, []);
-
-      const indexes = await M.listIndexes();
-      assert.deepEqual(indexes.map(i => i.key), [
-        { _id: 1 },
-        { name: 1, age: -1 }
-      ]);
-
-      // New model, same collection, different key order
-      schema = new Schema({ name: String, age: Number }, opts);
-      schema.index({ age: -1, name: 1 });
-      db.deleteModel(/Test/);
-      M = db.model('Test', schema, coll);
-
-      dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, ['name_1_age_-1']);
-
-    });
-
-    it('syncIndexes() with different key order (gh-8559)', async function() {
-      this.timeout(5000);
-
-
-      await db.dropDatabase();
-
-      const opts = { autoIndex: false };
-      let schema = new Schema({ name: String, age: Number }, opts);
-      schema.index({ name: 1, _id: 1 });
-
-      let M = db.model('Test', schema);
-
-      let dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, []);
-
-      // New model, same collection, different key order
-      schema = new Schema({ name: String, age: Number }, opts);
-      schema.index({ name: 1 });
-      db.deleteModel(/Test/);
-      M = db.model('Test', schema);
-
-      dropped = await M.syncIndexes();
-      assert.deepEqual(dropped, ['name_1__id_1']);
-
-    });
-
-    it('syncIndexes() allows overwriting `background` option (gh-8645)', async function() {
-      await db.dropDatabase();
-
-      const opts = { autoIndex: false };
-      const schema = new Schema({ name: String }, opts);
-      schema.index({ name: 1 }, { background: true });
-
-      const M = db.model('Test', schema);
-      await M.syncIndexes({ background: false });
-
-      const indexes = await M.listIndexes();
-      assert.deepEqual(indexes[1].key, { name: 1 });
-      assert.strictEqual(indexes[1].background, false);
-    });
-
-    it('should not drop a text index on .syncIndexes() call (gh-10850)', async function() {
-      const collation = { collation: { locale: 'simple' } };
-      const someSchema = new Schema({
-        title: String,
-        author: String
+        // Assert
+        const indexes = await User.listIndexes();
+        assert.deepStrictEqual(indexes.map(index => index.name), ['_id_', 'name_1']);
       });
-      someSchema.index({ title: 1, author: 'text' }, collation);
-      const M = db.model('Some', someSchema);
-      await M.init();
-      await M.syncIndexes();
-      assert(await M.syncIndexes(), []);
+
+      it('drops indexes that are not present in schema', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          {
+            name: { type: String, index: true },
+            age: Number
+          },
+          { autoIndex: false }
+        );
+        const User = db.model('User', userSchema, collectionName);
+        await User.collection.createIndex({ age: 1 });
+
+        // Act
+        const droppedIndexes = await User.syncIndexes();
+        const indexesAfterSync = await User.listIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedIndexes, ['age_1']);
+        assert.deepStrictEqual(indexesAfterSync.map(index => index.name), ['_id_', 'name_1']);
+      });
+
+      it('when two different models connect to the same collection, syncIndexes(...) respects the last call', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          {
+            name: { type: String, index: true },
+            age: Number
+          },
+          { autoIndex: false }
+        );
+        const User = db.model('User', userSchema, collectionName);
+
+        const orderSchema = new Schema(
+          {
+            totalPrice: { type: Number, index: true }
+          },
+          { autoIndex: false }
+        );
+        const Order = db.model('Order', orderSchema, collectionName);
+        await User.createCollection();
+
+        // Act
+        const userIndexesBeforeSync = await User.listIndexes();
+        await User.syncIndexes();
+        const orderIndexesBeforeSync = await Order.listIndexes();
+        const droppedOrderIndexes = await Order.syncIndexes();
+
+        // Assert
+        assert.deepStrictEqual(userIndexesBeforeSync.map(index => index.name), ['_id_']);
+
+        assert.deepStrictEqual(orderIndexesBeforeSync.map(index => index.name), ['_id_', 'name_1']);
+        assert.deepStrictEqual(droppedOrderIndexes, ['name_1']);
+      });
+
+      it('when two models have the same collection name, same field but different options, syncIndexes(...) respects the last call', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          {
+            customId: { type: String, index: true },
+            age: Number
+          },
+          { autoIndex: false }
+        );
+        const User = db.model('User', userSchema, collectionName);
+
+        const orderSchema = new Schema(
+          {
+            customId: { type: String, unique: true }
+          },
+          { autoIndex: false }
+        );
+        const Order = db.model('Order', orderSchema, collectionName);
+        await User.createCollection();
+
+        // Act
+        await User.syncIndexes();
+        const userIndexes = await User.listIndexes();
+        await Order.syncIndexes();
+        const orderIndexes = await Order.listIndexes();
+
+        // Assert
+        const userCustomIdIndex = userIndexes.find(index => index.key.customId === 1);
+        assert.strictEqual(userCustomIdIndex.unique, undefined);
+
+        const orderCustomIdIndex = orderIndexes.find(index => index.key.customId === 1);
+        assert.strictEqual(orderCustomIdIndex.unique, true);
+      });
+
+      it('when syncIndexes(...) is called twice with no changes on the model, the second call should not do anything', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          {
+            name: { type: String, index: true },
+            age: Number
+          },
+          { autoIndex: false }
+        );
+        const User = db.model('User', userSchema, collectionName);
+
+        // Act
+        await User.collection.createIndex({ age: 1 });
+        const droppedIndexesFromFirstSync = await User.syncIndexes();
+        const droppedIndexesFromSecondSync = await User.syncIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedIndexesFromFirstSync, ['age_1']);
+        assert.deepStrictEqual(droppedIndexesFromSecondSync, []);
+      });
+
+      it('when called with different key order, it treats different order as different indexes (gh-8135)', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          { name: String, age: Number },
+          { autoIndex: false }
+        );
+        userSchema.index({ name: 1, age: -1 });
+        const User = db.model('User', userSchema, collectionName);
+        await User.collection.createIndex({ age: -1, name: 1 });
+
+        // Act
+        const droppedIndexes = await User.syncIndexes();
+        const indexesAfterSync = await User.listIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedIndexes, ['age_-1_name_1']);
+
+        const compoundIndex = indexesAfterSync.find(index => index.key.name === 1 && index.key.age === -1);
+        assert.strictEqual(compoundIndex.name, 'name_1_age_-1');
+      });
+
+      it('syncIndexes(...) compound index including `_id` (gh-8559)', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const userSchema = new Schema(
+          { name: String, age: Number },
+          { autoIndex: false }
+        );
+        userSchema.index({ name: 1 });
+        const User = db.model('User', userSchema, collectionName);
+        await User.collection.createIndex({ name: 1, _id: 1 });
+
+        // Act
+        const droppedIndexes = await User.syncIndexes();
+        const indexesAfterSync = await User.listIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedIndexes, ['name_1__id_1']);
+        assert.deepStrictEqual(
+          indexesAfterSync.map(index => index.name),
+          ['_id_', 'name_1']
+        );
+      });
+
+      it('syncIndexes() allows overwriting `background` option (gh-8645)', async function() {
+        const opts = { autoIndex: false };
+        const schema = new Schema({ name: String }, opts);
+        schema.index({ name: 1 }, { background: true });
+
+        const M = db.model('Test', schema);
+        await M.syncIndexes({ background: false });
+
+        const indexes = await M.listIndexes();
+        assert.deepEqual(indexes[1].key, { name: 1 });
+        assert.strictEqual(indexes[1].background, false);
+      });
+
+      it('should not drop a text index on .syncIndexes() call (gh-10850)', async function() {
+        const collation = { collation: { locale: 'simple' } };
+        const someSchema = new Schema({
+          title: String,
+          author: String
+        });
+        someSchema.index({ title: 1, author: 'text' }, collation);
+        const M = db.model('Some', someSchema);
+        await M.init();
+        await M.syncIndexes();
+        assert(await M.syncIndexes(), []);
+      });
+
+      it('adding discriminators should not drop the parent model\'s indexes', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+
+        const eventSchema = new Schema({
+          actorId: { type: Schema.Types.ObjectId, index: true }
+        }, { autoIndex: false });
+
+        const Event = db.model('Event', eventSchema, collectionName);
+
+        Event.discriminator('AEvent', { aField: String });
+        Event.discriminator('BEvent', { bField: String });
+
+        // Act
+        await db.syncIndexes();
+
+        const indexes = await Event.listIndexes();
+
+        // Assert
+        const actorIdIndex = indexes.find(index => index.name === 'actorId_1');
+        assert.ok(actorIdIndex);
+      });
+
+      it('syncing model with multiple discriminators works', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const eventSchema = new Schema(
+          { actorId: { type: Schema.Types.ObjectId } },
+          { autoIndex: false }
+        );
+        eventSchema.index({ actorId: 1 }, { unique: true });
+
+        const Event = db.model('Event', eventSchema, collectionName);
+
+        const clickEventSchema = new Schema(
+          {
+            clickedAt: Date,
+            productCategory: String
+          },
+          { autoIndex: false }
+        );
+        clickEventSchema.index(
+          { clickedAt: 1 },
+          { partialFilterExpression: { productCategory: 'Computers' } }
+        );
+        const ClickEvent = Event.discriminator('ClickEvent', clickEventSchema);
+
+        const buyEventSchema = new Schema(
+          {
+            boughtAt: String,
+            productPrice: Number
+          },
+          { autoIndex: false }
+        );
+        buyEventSchema.index(
+          { boughtAt: 1 },
+          {
+            unique: true,
+            partialFilterExpression: { productPrice: { $gt: 100 } }
+          }
+        );
+        const BuyEvent = Event.discriminator('BuyEvent', buyEventSchema);
+
+        // Act
+        const droppedByEvent = await Event.syncIndexes({ background: false });
+        const droppedByClickEvent = await ClickEvent.syncIndexes({ background: false });
+        const droppedByBuyEvent = await BuyEvent.syncIndexes({ background: false });
+
+        const eventIndexes = await Event.listIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedByEvent, []);
+        assert.deepStrictEqual(droppedByClickEvent, []);
+        assert.deepStrictEqual(droppedByBuyEvent, []);
+
+        assert.deepStrictEqual(
+          eventIndexes.map(index => pick(index, ['key', 'unique', 'partialFilterExpression'])),
+          [
+            { key: { _id: 1 } },
+            {
+              unique: true,
+              key: { actorId: 1 }
+            },
+            {
+              key: { clickedAt: 1 },
+              partialFilterExpression: {
+                productCategory: 'Computers',
+                __t: 'ClickEvent'
+              }
+            },
+            {
+              unique: true,
+              key: { boughtAt: 1 },
+              partialFilterExpression: {
+                productPrice: { $gt: 100 },
+                __t: 'BuyEvent'
+              }
+            }
+          ]
+        );
+      });
+
+      it('syncing one discriminator\'s indexes should not drop the main model\'s indexes', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const eventSchema = new Schema(
+          { actorId: { type: Schema.Types.ObjectId } },
+          { autoIndex: false }
+        );
+        eventSchema.index({ actorId: 1 }, { unique: true });
+
+        const Event = db.model('Event', eventSchema, collectionName);
+
+        const clickEventSchema = new Schema(
+          {
+            clickedAt: Date,
+            productCategory: String
+          },
+          { autoIndex: false }
+        );
+        clickEventSchema.index(
+          { clickedAt: 1 },
+          { partialFilterExpression: { productCategory: 'Computers' } }
+        );
+        const ClickEvent = Event.discriminator('ClickEvent', clickEventSchema);
+
+        const buyEventSchema = new Schema(
+          {
+            boughtAt: String,
+            productPrice: Number
+          },
+          { autoIndex: false }
+        );
+        buyEventSchema.index(
+          { boughtAt: 1 },
+          {
+            unique: true,
+            partialFilterExpression: { productPrice: { $gt: 100 } }
+          }
+        );
+        Event.discriminator('BuyEvent', buyEventSchema);
+
+        // Act
+        const droppedByEvent = await Event.syncIndexes();
+        const droppedByClickEvent = await ClickEvent.syncIndexes();
+
+        const eventIndexes = await Event.listIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedByEvent, []);
+        assert.deepStrictEqual(droppedByClickEvent, []);
+
+        assert.deepStrictEqual(
+          eventIndexes.map(index => pick(index, ['key', 'unique', 'partialFilterExpression'])),
+          [
+            { key: { _id: 1 } },
+            {
+              unique: true,
+              key: { actorId: 1 }
+            },
+            {
+              key: { clickedAt: 1 },
+              partialFilterExpression: {
+                productCategory: 'Computers',
+                __t: 'ClickEvent'
+              }
+            }
+          ]
+        );
+      });
+
+      it('syncing main model does not sync discrimator indexes', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const eventSchema = new Schema(
+          { actorId: { type: Schema.Types.ObjectId } },
+          { autoIndex: false }
+        );
+        eventSchema.index({ actorId: 1 }, { unique: true });
+
+        const Event = db.model('Event', eventSchema, collectionName);
+
+        const clickEventSchema = new Schema(
+          {
+            clickedAt: Date,
+            productCategory: String
+          },
+          { autoIndex: false }
+        );
+        clickEventSchema.index(
+          { clickedAt: 1 },
+          { partialFilterExpression: { productCategory: 'Computers' } }
+        );
+        const ClickEvent = Event.discriminator('ClickEvent', clickEventSchema);
+
+        const buyEventSchema = new Schema(
+          {
+            boughtAt: String,
+            productPrice: Number
+          },
+          { autoIndex: false }
+        );
+        buyEventSchema.index(
+          { boughtAt: 1 },
+          {
+            unique: true,
+            partialFilterExpression: { productPrice: { $gt: 100 } }
+          }
+        );
+        Event.discriminator('BuyEvent', buyEventSchema);
+
+        // Act
+        const droppedByEvent = await Event.syncIndexes();
+        const eventIndexesBeforeSyncingClickEvents = await Event.listIndexes();
+
+        const droppedByClickEvent = await ClickEvent.syncIndexes();
+        const eventIndexesAfterSyncingClickEvents = await ClickEvent.listIndexes();
+
+
+        // Assert
+        assert.deepStrictEqual(droppedByEvent, []);
+        assert.deepStrictEqual(droppedByClickEvent, []);
+
+        assert.deepStrictEqual(
+          eventIndexesBeforeSyncingClickEvents.map(index => pick(index, ['key', 'unique', 'partialFilterExpression'])),
+          [
+            { key: { _id: 1 } },
+            {
+              unique: true,
+              key: { actorId: 1 }
+            }
+          ]
+        );
+
+        assert.deepStrictEqual(
+          eventIndexesAfterSyncingClickEvents.map(index => pick(index, ['key', 'unique', 'partialFilterExpression'])),
+          [
+            { key: { _id: 1 } },
+            {
+              unique: true,
+              key: { actorId: 1 }
+            },
+            {
+              key: { clickedAt: 1 },
+              partialFilterExpression: {
+                productCategory: 'Computers',
+                __t: 'ClickEvent'
+              }
+            }
+          ]
+        );
+
+      });
+      it('syncing discriminator does not attempt to sync parent model\'s indexes', async() => {
+        // Arrange
+        const collectionName = generateRandomCollectionName();
+        const eventSchema = new Schema(
+          { actorId: { type: Schema.Types.ObjectId } },
+          { autoIndex: false }
+        );
+        eventSchema.index({ actorId: 1 }, { unique: true });
+
+        const Event = db.model('Event', eventSchema, collectionName);
+
+        const clickEventSchema = new Schema(
+          {
+            clickedAt: Date,
+            productCategory: String
+          },
+          { autoIndex: false }
+        );
+        clickEventSchema.index(
+          { clickedAt: 1 },
+          { partialFilterExpression: { productCategory: 'Computers' } }
+        );
+        const ClickEvent = Event.discriminator('ClickEvent', clickEventSchema);
+
+        const buyEventSchema = new Schema(
+          {
+            boughtAt: String,
+            productPrice: Number
+          },
+          { autoIndex: false }
+        );
+        buyEventSchema.index(
+          { boughtAt: 1 },
+          {
+            unique: true,
+            partialFilterExpression: { productPrice: { $gt: 100 } }
+          }
+        );
+        Event.discriminator('BuyEvent', buyEventSchema);
+
+        // Act
+        const droppedByClickEvent = await ClickEvent.syncIndexes();
+        const eventIndexesAfterSyncingClickEvents = await ClickEvent.listIndexes();
+
+        const droppedByEvent = await Event.syncIndexes();
+        const eventIndexesAfterSyncingEverything = await Event.listIndexes();
+
+        // Assert
+        assert.deepStrictEqual(droppedByClickEvent, []);
+        assert.deepStrictEqual(droppedByEvent, []);
+
+        assert.deepStrictEqual(
+          eventIndexesAfterSyncingClickEvents.map(index => pick(index, ['key', 'unique', 'partialFilterExpression'])),
+          [
+            { key: { _id: 1 } },
+            {
+              key: { clickedAt: 1 },
+              partialFilterExpression: {
+                productCategory: 'Computers',
+                __t: 'ClickEvent'
+              }
+            }
+          ]
+        );
+        assert.deepStrictEqual(
+          eventIndexesAfterSyncingEverything.map(index => pick(index, ['key', 'unique', 'partialFilterExpression'])),
+          [
+            { key: { _id: 1 } },
+            {
+              key: { clickedAt: 1 },
+              partialFilterExpression: {
+                productCategory: 'Computers',
+                __t: 'ClickEvent'
+              }
+            },
+            {
+              unique: true,
+              key: { actorId: 1 }
+            }
+          ]
+        );
+
+      });
+
+      it('creates indexes only when they do not exist on the mongodb server (gh-12250)', async() => {
+        const userSchema = new Schema({
+          name: { type: String }
+        }, { autoIndex: false });
+
+        userSchema.index({ name: 1 });
+
+        const User = db.model('User', userSchema);
+
+        await User.init();
+
+        const createIndexSpy = sinon.spy(User.collection, 'createIndex');
+        const listIndexesSpy = sinon.spy(User.collection, 'listIndexes');
+
+        await User.syncIndexes();
+
+        assert.equal(createIndexSpy.callCount, 1);
+        assert.equal(listIndexesSpy.callCount, 1);
+
+        await User.syncIndexes();
+
+        assert.equal(listIndexesSpy.callCount, 2);
+        assert.equal(createIndexSpy.callCount, 1);
+      });
     });
 
-    it('using `new db.model()()` (gh-6698)', function(done) {
+    it('using `new db.model()()` (gh-6698)', function() {
       db.model('Test', new Schema({
         name: String
       }));
@@ -6252,11 +6959,9 @@ describe('Model', function() {
       assert.throws(function() {
         new db.model('Test')({ name: 'test' });
       }, /should not be run with `new`/);
-
-      done();
     });
 
-    it('throws if non-function passed as callback (gh-6640)', function(done) {
+    it('throws if non-function passed as callback (gh-6640)', function() {
       const Model = db.model('Test', new Schema({
         name: String
       }));
@@ -6266,8 +6971,6 @@ describe('Model', function() {
       assert.throws(function() {
         doc.save({}, {});
       }, /callback must be a function/i);
-
-      done();
     });
 
     it('Throws when saving same doc in parallel w/ promises (gh-6456)', function(done) {
@@ -6354,7 +7057,262 @@ describe('Model', function() {
       const res = await db.collection(collectionName).
         find({}).sort({ name: 1 }).toArray();
       assert.deepEqual(res.map(v => v.name), ['alpha', 'Zeta']);
+    });
 
+    it('createCollection() respects timeseries (gh-10611)', async function() {
+      const version = await start.mongodVersion();
+      if (version[0] < 5) {
+        this.skip();
+        return;
+      }
+
+      const schema = Schema({ name: String, timestamp: Date, metadata: Object }, {
+        timeseries: {
+          timeField: 'timestamp',
+          metaField: 'metadata',
+          granularity: 'hours'
+        },
+        autoCreate: false,
+        autoIndex: false,
+        expireAfterSeconds: 86400
+      });
+
+      const Test = db.model('Test', schema, 'Test');
+      await Test.init();
+
+      await Test.collection.drop().catch(() => {});
+      await Test.createCollection();
+
+      const collections = await Test.db.db.listCollections().toArray();
+      const coll = collections.find(coll => coll.name === 'Test');
+      assert.ok(coll);
+      assert.equal(coll.type, 'timeseries');
+      assert.equal(coll.options.timeseries.timeField, 'timestamp');
+
+      await Test.collection.drop().catch(() => {});
+    });
+
+    it('createCollection() enforces expireAfterSeconds (gh-11229)', async function() {
+      const version = await start.mongodVersion();
+      if (version[0] < 5) {
+        this.skip();
+        return;
+      }
+
+      const schema = Schema({ name: String, timestamp: Date, metadata: Object }, {
+        timeseries: {
+          timeField: 'timestamp',
+          metaField: 'metadata',
+          granularity: 'hours'
+        },
+        autoCreate: false
+      });
+
+      const Test = db.model('TestGH11229Var1', schema);
+
+      await Test.collection.drop().catch(() => {});
+      await Test.createCollection({ expireAfterSeconds: 5 });
+
+      const collOptions = await Test.collection.options();
+      assert.ok(collOptions);
+      assert.equal(collOptions.expireAfterSeconds, 5);
+      assert.ok(collOptions.timeseries);
+    });
+
+    it('createCollection() enforces expires (gh-11229)', async function() {
+      this.timeout(10000);
+      const version = await start.mongodVersion();
+      if (version[0] < 5) {
+        this.skip();
+        return;
+      }
+
+      const schema = Schema({ name: String, timestamp: Date, metadata: Object }, {
+        timeseries: {
+          timeField: 'timestamp',
+          metaField: 'metadata',
+          granularity: 'hours'
+        },
+        autoCreate: false
+      });
+
+      const Test = db.model('TestGH11229Var2', schema, 'TestGH11229Var2');
+
+      await Test.collection.drop().catch(() => {});
+      await Test.createCollection({ expires: '5 seconds' });
+
+      const collOptions = await Test.collection.options();
+      assert.ok(collOptions);
+      assert.equal(collOptions.expireAfterSeconds, 5);
+      assert.ok(collOptions.timeseries);
+    });
+
+    it('createCollection() enforces expireAfterSeconds when set by Schema (gh-11229)', async function() {
+      const version = await start.mongodVersion();
+      if (version[0] < 5) {
+        this.skip();
+        return;
+      }
+
+      const schema = Schema({ name: String, timestamp: Date, metadata: Object }, {
+        timeseries: {
+          timeField: 'timestamp',
+          metaField: 'metadata',
+          granularity: 'hours'
+        },
+        autoCreate: false,
+        expireAfterSeconds: 5
+      });
+
+      const Test = db.model('TestGH11229Var3', schema);
+
+      await Test.collection.drop().catch(() => {});
+      await Test.createCollection();
+
+      const collOptions = await Test.collection.options();
+      assert.ok(collOptions);
+      assert.equal(collOptions.expireAfterSeconds, 5);
+      assert.ok(collOptions.timeseries);
+    });
+
+    it('createCollection() enforces expires when set by Schema (gh-11229)', async function() {
+      const version = await start.mongodVersion();
+      if (version[0] < 5) {
+        this.skip();
+        return;
+      }
+
+      const schema = Schema({ name: String, timestamp: Date, metadata: Object }, {
+        timeseries: {
+          timeField: 'timestamp',
+          metaField: 'metadata',
+          granularity: 'hours'
+        },
+        autoCreate: false,
+        expires: '5 seconds'
+      });
+
+      const Test = db.model('TestGH11229Var4', schema);
+
+      await Test.collection.drop().catch(() => {});
+      await Test.createCollection();
+
+      const collOptions = await Test.collection.options();
+      assert.ok(collOptions);
+      assert.equal(collOptions.expireAfterSeconds, 5);
+      assert.ok(collOptions.timeseries);
+    });
+
+    it('mongodb actually removes expired documents (gh-11229)', async function() {
+      this.timeout(1000 * 80); // 80 seconds, see later comments on why
+      const version = await start.mongodVersion();
+      if (version[0] < 5) {
+        this.skip();
+        return;
+      }
+
+      const schema = Schema({ name: String, timestamp: Date, metadata: Object }, {
+        timeseries: {
+          timeField: 'timestamp',
+          metaField: 'metadata',
+          granularity: 'hours'
+        },
+        autoCreate: false
+      });
+
+      const Test = db.model('TestMongoDBExpireRemoval', schema);
+
+      await Test.collection.drop().catch(() => {});
+      await Test.createCollection({ expireAfterSeconds: 5 });
+
+      await Test.insertMany([
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-18T00:00:00.000Z'),
+          temp: 12
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-18T04:00:00.000Z'),
+          temp: 11
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-18T08:00:00.000Z'),
+          temp: 11
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-18T12:00:00.000Z'),
+          temp: 12
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-18T16:00:00.000Z'),
+          temp: 16
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-18T20:00:00.000Z'),
+          temp: 15
+        }, {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-19T00:00:00.000Z'),
+          temp: 13
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-19T04:00:00.000Z'),
+          temp: 12
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-19T08:00:00.000Z'),
+          temp: 11
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-19T12:00:00.000Z'),
+          temp: 12
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-19T16:00:00.000Z'),
+          temp: 17
+        },
+        {
+          metadata: { sensorId: 5578, type: 'temperature' },
+          timestamp: new Date('2021-05-19T20:00:00.000Z'),
+          temp: 12
+        }
+      ]);
+
+      const beforeExpirationCount = await Test.count({});
+      assert.ok(beforeExpirationCount === 12);
+
+      let intervalid;
+
+      await Promise.race([
+        // wait for 61 seconds, because mongodb's removal routine runs every 60 seconds, so it may be VERY flakey otherwise
+        // under heavy load it is still not guranteed to actually run
+        // see https://www.mongodb.com/docs/manual/core/timeseries/timeseries-automatic-removal/#timing-of-delete-operations
+        new Promise(resolve => setTimeout(resolve, 1000 * 61)), // 61 seconds
+
+        // in case it happens faster, to reduce test time
+        new Promise(resolve => {
+          intervalid = setInterval(async() => {
+            const count = await Test.count({});
+            if (count === 0) {
+              resolve();
+            }
+          }, 1000); // every 1 second
+        })
+      ]);
+
+      clearInterval(intervalid);
+
+      const afterExpirationCount = await Test.count({});
+      assert.equal(afterExpirationCount, 0);
     });
 
     it('createCollection() handles NamespaceExists errors (gh-9447)', async function() {
@@ -6442,7 +7400,7 @@ describe('Model', function() {
     Model.events.on('error', err => { called.push(err); });
 
 
-    await Model.findOne({ _id: 'notanid' }).catch(() => {});
+    await Model.findOne({ _id: 'Not a valid ObjectId' }).catch(() => {});
     assert.equal(called.length, 1);
     assert.equal(called[0].name, 'CastError');
 
@@ -6613,150 +7571,48 @@ describe('Model', function() {
     }, /Model\.discriminator.*MyModel/);
   });
 
-  describe('exists() (gh-6872)', function() {
-    it('returns true if document exists', function() {
+  describe('exists() (gh-6872) (gh-8097) (gh-11138)', function() {
+    it('returns a query', () => {
+      const User = db.model('Test', new Schema({ name: String }));
+      const query = User.exists({ name: 'Hafez' });
+      assert.ok(query instanceof mongoose.Query);
+    });
+
+    it('returns lean document with `_id` only if document exists', async function() {
       const Model = db.model('Test', new Schema({ name: String }));
 
-      return Model.create({ name: 'foo' }).
-        then(() => Model.exists({ name: 'foo' })).
-        then(res => assert.ok(res)).
-        then(() => Model.exists({})).
-        then(res => assert.ok(res)).
-        then(() => Model.exists()).
-        then(res => assert.ok(res));
+      const docFromCreation = await Model.create({ name: 'foo' });
+      const existingDocument = await Model.exists({ _id: docFromCreation._id });
+      assert.equal(existingDocument._id.toString(), docFromCreation._id.toString());
+      assert.deepStrictEqual(existingDocument, { _id: docFromCreation._id });
+      assert.ok(isLean(existingDocument));
     });
 
-    it('returns false if no doc exists', function() {
+
+    it('returns `null` when no document exists', async() => {
       const Model = db.model('Test', new Schema({ name: String }));
 
-      return Model.create({ name: 'foo' }).
-        then(() => Model.exists({ name: 'bar' })).
-        then(res => assert.ok(!res)).
-        then(() => Model.exists({ otherProp: 'foo' }, { strict: false })).
-        then(res => assert.ok(!res));
+      const existingDocument = await Model.exists({ name: 'I do not exist' });
+      assert.equal(existingDocument, null);
     });
-
-    it('options (gh-8075)', function() {
+    it('returns `null` if no doc exists', async function() {
       const Model = db.model('Test', new Schema({ name: String }));
 
-      return Model.exists({}).
-        then(res => assert.ok(!res)).
-        then(() => Model.exists({}, { explain: true })).
-        then(res => assert.ok(res));
-    });
-  });
+      await Model.create({ name: 'foo' });
 
-  it('Model.validate() (gh-7587)', async function() {
-    const Model = db.model('Test', new Schema({
-      name: {
-        first: {
-          type: String,
-          required: true
-        },
-        last: {
-          type: String,
-          required: true
-        }
-      },
-      age: {
-        type: Number,
-        required: true
-      },
-      comments: [{ name: { type: String, required: true } }]
-    }));
-
-
-    let err = null;
-    let obj = null;
-
-    err = await Model.validate({ age: null }, ['age']).
-      then(() => null, err => err);
-    assert.ok(err);
-    assert.deepEqual(Object.keys(err.errors), ['age']);
-
-    err = await Model.validate({ name: {} }, ['name']).
-      then(() => null, err => err);
-    assert.ok(err);
-    assert.deepEqual(Object.keys(err.errors), ['name.first', 'name.last']);
-
-    obj = { name: { first: 'foo' } };
-    err = await Model.validate(obj, ['name']).
-      then(() => null, err => err);
-    assert.ok(err);
-    assert.deepEqual(Object.keys(err.errors), ['name.last']);
-
-    obj = { comments: [{ name: 'test' }, {}] };
-    err = await Model.validate(obj, ['comments']).
-      then(() => null, err => err);
-    assert.ok(err);
-    assert.deepEqual(Object.keys(err.errors), ['comments.name']);
-
-    obj = { age: '42' };
-    await Model.validate(obj, ['age']);
-    assert.strictEqual(obj.age, 42);
-  });
-
-  it('Model.validate(...) validates paths in arrays (gh-8821)', async function() {
-    const userSchema = new Schema({
-      friends: [{ type: String, required: true, minlength: 3 }]
+      const existingDocumentWithStrict = await Model.exists({ otherProp: 'foo' }, { strict: false });
+      assert.equal(existingDocumentWithStrict, null);
     });
 
-    const User = db.model('User', userSchema);
+    it('options (gh-8075)', async function() {
+      const Model = db.model('Test', new Schema({ name: String }));
 
-    const err = await User.validate({ friends: [null, 'A'] }).catch(err => err);
+      const existingDocument = await Model.exists({});
+      assert.equal(existingDocument, null);
 
-    assert.ok(err.errors['friends.0']);
-    assert.ok(err.errors['friends.1']);
-
-  });
-
-  it('Model.validate() works with arrays (gh-10669)', async function() {
-    const testSchema = new Schema({
-      docs: [String]
+      const explainResult = await Model.exists({}, { explain: true });
+      assert.ok(explainResult);
     });
-
-    const Test = db.model('Test', testSchema);
-
-    const test = { docs: ['6132655f2cdb9d94eaebc09b'] };
-
-    const err = await Test.validate(test);
-    assert.ifError(err);
-  });
-
-  it('Model.validate(...) uses document instance as context by default (gh-10132)', async function() {
-    const userSchema = new Schema({
-      name: {
-        type: String,
-        required: function() {
-          return this.nameRequired;
-        }
-      },
-      nameRequired: Boolean
-    });
-
-    const User = db.model('User', userSchema);
-
-    const user = new User({ name: 'test', nameRequired: false });
-    const err = await User.validate(user).catch(err => err);
-
-    assert.ifError(err);
-
-  });
-  it('Model.validate(...) uses object as context by default (gh-10346)', async() => {
-
-    const userSchema = new mongoose.Schema({
-      name: { type: String, required: true },
-      age: { type: Number, required() {return this && this.name === 'John';} }
-    });
-
-    const User = db.model('User', userSchema);
-
-    const err1 = await User.validate({ name: 'John' }).then(() => null, err => err);
-    assert.ok(err1);
-
-    const err2 = await User.validate({ name: 'Sam' }).then(() => null, err => err);
-    assert.ok(err2 === null);
-
   });
 
   it('sets correct `Document#op` with `save()` (gh-8439)', function() {
@@ -7034,6 +7890,38 @@ describe('Model', function() {
 
   });
 
+  it('Model.bulkWrite(...) does not hang with empty array and ordered: false (gh-13664)', async function() {
+    const userSchema = new Schema({ name: String });
+    const User = db.model('User', userSchema);
+
+    const res = await User.bulkWrite([], { ordered: false });
+    assert.deepEqual(
+      res,
+      {
+        result: {
+          ok: 1,
+          writeErrors: [],
+          writeConcernErrors: [],
+          insertedIds: [],
+          nInserted: 0,
+          nUpserted: 0,
+          nMatched: 0,
+          nModified: 0,
+          nRemoved: 0,
+          upserted: []
+        },
+        insertedCount: 0,
+        matchedCount: 0,
+        modifiedCount: 0,
+        deletedCount: 0,
+        upsertedCount: 0,
+        upsertedIds: {},
+        insertedIds: {},
+        n: 0
+      }
+    );
+  });
+
   it('allows calling `create()` after `bulkWrite()` (gh-9350)', async function() {
     const schema = Schema({ foo: Boolean });
     const Model = db.model('Test', schema);
@@ -7270,6 +8158,73 @@ describe('Model', function() {
 
       assert.equal(writeOperations.length, 3);
     });
+
+    it('accepts `timestamps: false` (gh-12059)', async() => {
+      // Arrange
+      const userSchema = new Schema({
+        name: { type: String, minLength: 5 }
+      });
+
+      const User = db.model('User', userSchema);
+
+      const newUser = new User({ name: 'Hafez' });
+      const userToUpdate = await User.create({ name: 'Hafez' });
+      userToUpdate.name = 'John Doe';
+
+      // Act
+      const writeOperations = User.buildBulkWriteOperations([newUser, userToUpdate], { timestamps: false, skipValidation: true });
+
+      // Assert
+      const timestampsOptions = writeOperations.map(writeOperationContainer => {
+        const operationObject = writeOperationContainer.updateOne || writeOperationContainer.insertOne;
+        return operationObject.timestamps;
+      });
+      assert.deepEqual(timestampsOptions, [false, false]);
+    });
+    it('accepts `timestamps: true` (gh-12059)', async() => {
+      // Arrange
+      const userSchema = new Schema({
+        name: { type: String, minLength: 5 }
+      });
+
+      const User = db.model('User', userSchema);
+
+      const newUser = new User({ name: 'Hafez' });
+      const userToUpdate = await User.create({ name: 'Hafez' });
+      userToUpdate.name = 'John Doe';
+
+      // Act
+      const writeOperations = User.buildBulkWriteOperations([newUser, userToUpdate], { timestamps: true, skipValidation: true });
+
+      // Assert
+      const timestampsOptions = writeOperations.map(writeOperationContainer => {
+        const operationObject = writeOperationContainer.updateOne || writeOperationContainer.insertOne;
+        return operationObject.timestamps;
+      });
+      assert.deepEqual(timestampsOptions, [true, true]);
+    });
+    it('`timestamps` has `undefined` as default value (gh-12059)', async() => {
+      // Arrange
+      const userSchema = new Schema({
+        name: { type: String, minLength: 5 }
+      });
+
+      const User = db.model('User', userSchema);
+
+      const newUser = new User({ name: 'Hafez' });
+      const userToUpdate = await User.create({ name: 'Hafez' });
+      userToUpdate.name = 'John Doe';
+
+      // Act
+      const writeOperations = User.buildBulkWriteOperations([newUser, userToUpdate], { skipValidation: true });
+
+      // Assert
+      const timestampsOptions = writeOperations.map(writeOperationContainer => {
+        const operationObject = writeOperationContainer.updateOne || writeOperationContainer.insertOne;
+        return operationObject.timestamps;
+      });
+      assert.deepEqual(timestampsOptions, [undefined, undefined]);
+    });
   });
 
   describe('bulkSave() (gh-9673)', function() {
@@ -7358,7 +8313,6 @@ describe('Model', function() {
 
     });
     it('throws an error on failure', async() => {
-
       const userSchema = new Schema({
         name: { type: String, unique: true }
       });
@@ -7378,8 +8332,8 @@ describe('Model', function() {
 
       const err = await User.bulkSave(users).then(() => null, err => err);
       assert.ok(err);
-
     });
+
     it('changes document state from `isNew` `false` to `true`', async() => {
 
       const userSchema = new Schema({
@@ -7507,6 +8461,124 @@ describe('Model', function() {
       assert.ok(err == null);
 
     });
+    it('Using bulkSave should not trigger an error (gh-11071)', async function() {
+
+      const pairSchema = mongoose.Schema({
+        name: String,
+        timestamp: String
+      }, { versionKey: false });
+
+      const model = db.model('test', pairSchema);
+      const tests = [
+        { name: 't1', timestamp: Date.now() },
+        { name: 't2', timestamp: Date.now() },
+        { name: 't3', timestamp: Date.now() },
+        { name: 't4', timestamp: Date.now() }
+      ];
+
+      await model.insertMany(tests, {
+        ordered: false
+      });
+      const entries = await model.find({});
+      for (const p of entries) {
+        p.timestamp = Date.now();
+      }
+
+      const res = await model.bulkSave(entries);
+      assert.ok(res);
+    });
+
+    it('accepts `timestamps: false` (gh-12059)', async() => {
+      // Arrange
+      const userSchema = new Schema({
+        name: { type: String }
+      }, { timestamps: true });
+
+      const User = db.model('User', userSchema);
+      const newUser = new User({ name: 'Sam' });
+
+      const userToUpdate = await User.create({ name: 'Hafez', createdAt: new Date('1994-12-04'), updatedAt: new Date('1994-12-04') });
+      userToUpdate.name = 'John Doe';
+
+      // Act
+      await User.bulkSave([newUser, userToUpdate], { timestamps: false });
+
+
+      // Assert
+      const createdUserPersistedInDB = await User.findOne({ _id: newUser._id });
+      assert.deepStrictEqual(newUser.createdAt, undefined);
+      assert.deepStrictEqual(newUser.updatedAt, undefined);
+
+      assert.deepStrictEqual(createdUserPersistedInDB.createdAt, undefined);
+      assert.deepStrictEqual(createdUserPersistedInDB.updatedAt, undefined);
+      assert.deepStrictEqual(userToUpdate.createdAt, new Date('1994-12-04'));
+      assert.deepStrictEqual(userToUpdate.updatedAt, new Date('1994-12-04'));
+    });
+
+    it('accepts `timestamps: true` (gh-12059)', async() => {
+      // Arrange
+      const userSchema = new Schema({
+        name: { type: String, minLength: 5 }
+      }, { timestamps: true });
+
+      const User = db.model('User', userSchema);
+
+      const newUser = new User({ name: 'Hafez' });
+      const userToUpdate = await User.create({ name: 'Hafez' });
+      userToUpdate.name = 'John Doe';
+
+      // Act
+      await User.bulkSave([newUser, userToUpdate], { timestamps: true });
+
+      // Assert
+      assert.ok(newUser.createdAt);
+      assert.ok(newUser.updatedAt);
+      assert.ok(userToUpdate.createdAt);
+      assert.ok(userToUpdate.updatedAt);
+    });
+
+    it('`timestamps` has `undefined` as default value (gh-12059)', async() => {
+      // Arrange
+      const userSchema = new Schema({
+        name: { type: String, minLength: 5 }
+      }, { timestamps: true });
+
+      const User = db.model('User', userSchema);
+
+      const newUser = new User({ name: 'Hafez' });
+      const userToUpdate = await User.create({ name: 'Hafez' });
+      userToUpdate.name = 'John Doe';
+
+      // Act
+      await User.bulkSave([newUser, userToUpdate]);
+
+      // Assert
+      assert.ok(newUser.createdAt);
+      assert.ok(newUser.updatedAt);
+      assert.ok(userToUpdate.createdAt);
+      assert.ok(userToUpdate.updatedAt);
+    });
+
+    it('respects `$timestamps()` (gh-12117)', async function() {
+      // Arrange
+      const userSchema = new Schema({ name: String }, { timestamps: true });
+
+      const User = db.model('User', userSchema);
+
+      const newUser1 = new User({ name: 'John' });
+      const newUser2 = new User({ name: 'Bill' });
+
+      newUser2.$timestamps(false);
+
+      // Act
+      await User.bulkSave([newUser1, newUser2]);
+
+      // Assert
+      assert.ok(newUser1.createdAt);
+      assert.ok(newUser1.updatedAt);
+      assert.ok(!newUser2.createdAt);
+      assert.ok(!newUser2.updatedAt);
+    });
   });
 
   describe('Setting the explain flag', function() {
@@ -7570,11 +8642,413 @@ describe('Model', function() {
     assert.ok(!test.name);
 
   });
+
+  it('casts ObjectIds with `ref` in schema when calling `hydrate()` (gh-11052)', async function() {
+    const authorSchema = new Schema({
+      name: String
+    });
+    const bookSchema = new Schema({
+      author: { type: 'ObjectId', required: true, ref: 'Author' }
+    });
+
+    const Book = db.model('Book', bookSchema);
+    const Author = db.model('Author', authorSchema);
+    const entry = await Author.create({
+      name: 'John'
+    });
+
+    const book = Book.hydrate({
+      author: entry.id
+    });
+
+    assert.ok(book.author instanceof mongoose.Types.ObjectId);
+  });
+
+  it('respects `hydrate()` projection (gh-11375)', function() {
+    const PieSchema = Schema({ filling: String, hoursToMake: Number, tasteRating: Number });
+    const Test = db.model('Test', PieSchema);
+    const doc = Test.hydrate({ filling: 'cherry', hoursToMake: 2 }, { filling: 1 });
+
+    assert.equal(doc.filling, 'cherry');
+    assert.equal(doc.hoursToMake, null);
+  });
+
+  it('supports setters option for `hydrate()` (gh-11653)', function() {
+    const schema = Schema({
+      text: {
+        type: String,
+        set: v => v.toLowerCase()
+      }
+    });
+    const Test = db.model('Test', schema);
+
+    const doc = Test.hydrate({ text: 'FOOBAR' }, null, { setters: true });
+    assert.equal(doc.text, 'foobar');
+  });
+
+  it('sets index collation based on schema collation (gh-7621)', async function() {
+    let testSchema = new Schema(
+      { name: { type: String, index: true } }
+    );
+    let Test = db.model('Test', testSchema);
+
+    await Test.init();
+
+    let indexes = await Test.collection.listIndexes().toArray();
+    assert.strictEqual(indexes.length, 2);
+    assert.deepEqual(indexes[1].key, { name: 1 });
+    assert.equal(indexes[1].collation, undefined);
+
+    db.deleteModel(/Test/);
+    testSchema = new Schema(
+      { name: { type: String, index: true } },
+      { collation: { locale: 'en' }, autoIndex: false }
+    );
+    Test = db.model('Test', testSchema);
+
+    await Test.init();
+    await Test.syncIndexes();
+
+    indexes = await Test.collection.listIndexes().toArray();
+    assert.strictEqual(indexes.length, 2);
+    assert.deepEqual(indexes[1].key, { name: 1 });
+    assert.strictEqual(indexes[1].collation.locale, 'en');
+  });
+
+  describe('Model.applyDefaults (gh-11945)', function() {
+    it('applies defaults to POJOs', function() {
+      const Test = db.model('Test', mongoose.Schema({
+        _id: false,
+        name: {
+          type: String,
+          default: 'John Smith'
+        },
+        age: {
+          type: Number,
+          default: 29
+        },
+        nestedName: {
+          first: {
+            type: String,
+            default: 'John'
+          },
+          last: {
+            type: String,
+            default: 'Smith'
+          },
+          middle: {
+            type: String,
+            default: ''
+          }
+        },
+        subdoc: {
+          type: mongoose.Schema({
+            _id: false,
+            test: {
+              type: String,
+              default: 'subdoc default'
+            }
+          }),
+          default: () => ({})
+        },
+        docArr: [{
+          _id: false,
+          test: {
+            type: String,
+            default: 'doc array default'
+          }
+        }]
+      }));
+
+      const obj = { age: 31, nestedName: { middle: 'James' }, docArr: [{}] };
+      Test.applyDefaults(obj);
+
+      assert.deepStrictEqual(obj, {
+        name: 'John Smith',
+        age: 31,
+        nestedName: { first: 'John', last: 'Smith', middle: 'James' },
+        subdoc: {
+          test: 'subdoc default'
+        },
+        docArr: [{
+          test: 'doc array default'
+        }]
+      });
+    });
+
+    it('applies defaults to documents', function() {
+      const Test = db.model('Test', mongoose.Schema({
+        _id: false,
+        name: {
+          type: String,
+          default: 'John Smith'
+        },
+        age: {
+          type: Number,
+          default: 29
+        },
+        nestedName: {
+          first: {
+            type: String,
+            default: 'John'
+          },
+          last: {
+            type: String,
+            default: 'Smith'
+          },
+          middle: {
+            type: String,
+            default: ''
+          }
+        },
+        subdoc: {
+          type: mongoose.Schema({
+            _id: false,
+            test: {
+              type: String,
+              default: 'subdoc default'
+            }
+          }),
+          default: () => ({})
+        },
+        docArr: [{
+          _id: false,
+          test: {
+            type: String,
+            default: 'doc array default'
+          }
+        }]
+      }));
+
+      const obj = { age: 31, nestedName: { middle: 'James' }, docArr: [{}] };
+      const doc = new Test(obj, null, { defaults: false });
+      Test.applyDefaults(doc);
+
+      assert.deepStrictEqual(doc.toObject(), {
+        name: 'John Smith',
+        age: 31,
+        nestedName: { first: 'John', last: 'Smith', middle: 'James' },
+        subdoc: {
+          test: 'subdoc default'
+        },
+        docArr: [{
+          test: 'doc array default'
+        }]
+      });
+    });
+  });
+
+  describe('castObject() (gh-11945)', function() {
+    it('casts values', function() {
+      const Test = db.model('Test', mongoose.Schema({
+        _id: false,
+        num: Number,
+        nested: {
+          num: Number
+        },
+        subdoc: {
+          type: mongoose.Schema({
+            _id: false,
+            num: Number
+          }),
+          default: () => ({})
+        },
+        docArr: [{
+          _id: false,
+          num: Number
+        }]
+      }));
+
+      const obj = {
+        num: '1',
+        nested: { num: '2' },
+        subdoc: { num: '3' },
+        docArr: [{ num: '4' }]
+      };
+      const ret = Test.castObject(obj);
+      assert.deepStrictEqual(ret, {
+        num: 1,
+        nested: { num: 2 },
+        subdoc: { num: 3 },
+        docArr: [{ num: 4 }]
+      });
+    });
+
+    it('throws if cannot cast', function() {
+      const Test = db.model('Test', mongoose.Schema({
+        _id: false,
+        num: Number,
+        nested: {
+          num: Number
+        },
+        subdoc: {
+          type: mongoose.Schema({
+            _id: false,
+            num: Number
+          })
+        },
+        docArr: [{
+          _id: false,
+          num: Number
+        }]
+      }));
+
+      const obj = {
+        num: 'foo',
+        nested: { num: 'bar' },
+        subdoc: { num: 'baz' },
+        docArr: [{ num: 'qux' }]
+      };
+      let error;
+      try {
+        Test.castObject(obj);
+      } catch (err) {
+        error = err;
+      }
+      assert.ok(error);
+      assert.equal(error.errors['num'].name, 'CastError');
+      assert.equal(error.errors['nested.num'].name, 'CastError');
+      assert.equal(error.errors['subdoc.num'].name, 'CastError');
+      assert.equal(error.errors['docArr.0.num'].name, 'CastError');
+    });
+    it('should not throw an error if `ignoreCastErrors` is set (gh-12156)', function() {
+      const Test = db.model('Test', mongoose.Schema({
+        _id: false,
+        num: Number,
+        nested: {
+          num: Number
+        },
+        subdoc: {
+          type: mongoose.Schema({
+            _id: false,
+            num: Number
+          }),
+          default: () => ({})
+        },
+        docArr: [{
+          _id: false,
+          num: Number
+        }]
+      }));
+
+      const obj = {
+        num: 'not a number',
+        nested: { num: '2' },
+        subdoc: { num: 'not a number' },
+        docArr: [{ num: '4' }]
+      };
+      const ret = Test.castObject(obj, { ignoreCastErrors: true });
+      assert.deepStrictEqual(ret, { nested: { num: 2 }, docArr: [{ num: 4 }] });
+    });
+  });
+
+  it('works if passing class that extends Document to `loadClass()` (gh-12254)', async function() {
+    const DownloadJobSchema = new mongoose.Schema({ test: String });
+
+    class B extends mongoose.Document {
+      get foo() { return 'bar'; }
+
+      bar() { return 'baz'; }
+    }
+
+    DownloadJobSchema.loadClass(B);
+
+    let Test = db.model('Test', DownloadJobSchema);
+
+    const { _id } = await Test.create({ test: 'value' });
+    let doc = await Test.findById(_id);
+    assert.ok(doc);
+    assert.equal(doc.foo, 'bar');
+    assert.equal(doc.test, 'value');
+    assert.equal(doc.bar(), 'baz');
+
+    db.deleteModel(/Test/);
+    Test = db.model('Test', { job: DownloadJobSchema });
+
+    await Test.deleteMany({});
+    await Test.create({ _id, job: { test: 'value' } });
+    doc = await Test.findById(_id);
+    assert.ok(doc);
+    assert.equal(doc.job.foo, 'bar');
+    assert.equal(doc.job.test, 'value');
+    assert.equal(doc.job.bar(), 'baz');
+  });
+
+  it('handles shared schema methods (gh-12423)', async function() {
+    const sharedSubSchema = new mongoose.Schema({
+      name: {
+        type: String
+      }
+    });
+
+    sharedSubSchema.methods.sharedSubSchemaMethod = function() {
+      return 'test';
+    };
+
+    const mainDocumentSchema = new mongoose.Schema({
+      subdocuments: {
+        type: [sharedSubSchema],
+        required: true
+      }
+    });
+    const Test1 = db.model('Test1', mainDocumentSchema);
+
+    const secondaryDocumentSchema = new mongoose.Schema({
+      subdocuments: {
+        type: [sharedSubSchema],
+        required: true
+      }
+    });
+    const Test2 = db.model('Test2', secondaryDocumentSchema);
+
+    const mainDoc = await Test1.create({
+      subdocuments: [
+        {
+          name: 'one'
+        }
+      ]
+    });
+
+    const secondaryDoc = await Test2.create({
+      subdocuments: [
+        {
+          name: 'secondary'
+        }
+      ]
+    });
+
+    assert.strictEqual(mainDoc.subdocuments[0].sharedSubSchemaMethod(), 'test');
+    assert.strictEqual(secondaryDoc.subdocuments[0].sharedSubSchemaMethod(), 'test');
+  });
+
+  describe('Check if static function that is supplied in schema option is available', function() {
+    it('should give a static function back rather than undefined', function() {
+      const testSchema = new Schema({}, { statics: { staticFn() { return 'Returned from staticFn'; } } });
+      const TestModel = db.model('TestModel', testSchema);
+      assert.equal(TestModel.staticFn(), 'Returned from staticFn');
+    });
+  });
 });
-
-
 
 
 async function delay(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isLean(document) {
+  return document != null && !(document instanceof mongoose.Document);
+}
+
+function generateRandomCollectionName() {
+  return 'mongoose_test_' + random();
+}
+
+function pick(obj, keys) {
+  const newObj = {};
+  for (const key of keys) {
+    if (obj[key] !== undefined) {
+      newObj[key] = obj[key];
+    }
+  }
+  return newObj;
 }

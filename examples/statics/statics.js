@@ -12,7 +12,7 @@ const Person = mongoose.model('Person');
 run().catch(console.error);
 
 async function run() {
-  await mongoose.connect('mongodb://localhost/persons');
+  await mongoose.connect('mongodb://127.0.0.1/persons');
   const bill = await Person.create({
     name: 'bill',
     age: 25,
@@ -24,7 +24,7 @@ async function run() {
   const result = await Person.findPersonByName('bill');
 
   console.log(result);
-  cleanup();
+  await cleanup();
 }
 
 async function cleanup() {

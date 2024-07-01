@@ -4,7 +4,7 @@
  * Module dependencies.
  */
 
-const mongoose = require('../');
+const mongoose = require('../index');
 const Collection = mongoose.Collection;
 const assert = require('assert');
 
@@ -66,7 +66,7 @@ Collection.prototype.onClose = function() {
 
 /**
  * Create a connection to the test database.
- * You can set the environmental variable MONGOOSE_TEST_URI to override this.
+ * You can set the environment variable MONGOOSE_TEST_URI to override this.
  *
  * @api private
  */
@@ -84,6 +84,7 @@ module.exports = function(options) {
 
   const noErrorListener = !!options.noErrorListener;
   delete options.noErrorListener;
+  options.enableUtf8Validation = false;
 
   const conn = mongoose.createConnection(uri, options);
 
@@ -113,17 +114,42 @@ module.exports = function(options) {
   return conn;
 };
 
-/*!
+function getUri(default_uri, db) {
+  const env = process.env.START_REPLICA_SET ? process.env.MONGOOSE_REPLSET_URI : process.env.MONGOOSE_TEST_URI;
+  const use = env ? env : default_uri;
+  const lastIndex = use.lastIndexOf('/');
+  const dbQueryString = use.slice(lastIndex);
+  const queryIndex = dbQueryString.indexOf('?');
+  const query = queryIndex === -1 ? '' : '?' + dbQueryString.slice(queryIndex + 1);
+  // use length if lastIndex is 9 or lower, because that would mean it found the last character of "mongodb://"
+  return use.slice(0, lastIndex <= 9 ? use.length : lastIndex) + `/${db}` + query;
+}
+
+/**
+ * Testing Databases, used for consistency
+ */
+
+const databases = module.exports.databases = [
+  'mongoose_test',
+  'mongoose_test_2'
+];
+
+/**
  * testing uri
  */
 
-module.exports.uri = 'mongodb://localhost:27017/mongoose_test';
+// the following has to be done, otherwise mocha will evaluate this before running the global-setup, where it becomes the default
+Object.defineProperty(module.exports, 'uri', {
+  get: () => getUri('mongodb://127.0.0.1:27017/', databases[0])
+});
 
-/*!
+/**
  * testing uri for 2nd db
  */
 
-module.exports.uri2 = 'mongodb://localhost:27017/mongoose_test_2';
+Object.defineProperty(module.exports, 'uri2', {
+  get: () => getUri('mongodb://127.0.0.1:27017/', databases[1])
+});
 
 /**
  * expose mongoose
@@ -159,39 +185,17 @@ module.exports.mongodVersion = async function() {
   });
 };
 
-function dropDBs(done) {
-  const db = module.exports({ noErrorListener: true });
-  db.once('open', function() {
-    // drop the default test database
-    db.db.dropDatabase(function() {
-      done();
-    });
-  });
+async function dropDBs() {
+  this.timeout(60000);
+
+  const db = await module.exports({ noErrorListener: true }).asPromise();
+  await db.dropDatabase();
+  await db.close();
 }
 
+before(dropDBs);
 
-before(function(done) {
-  this.timeout(10 * 1000);
-  dropDBs(done);
-});
-
-after(function(done) {
-  dropDBs(() => {});
-
-  // Give `dropDatabase()` some time to run
-  setTimeout(() => done(), 250);
-});
-
-beforeEach(function() {
-  if (this.currentTest) {
-    global.CURRENT_TEST = this.currentTest.title;
-    if (this.currentTest.parent.title) {
-      global.CURRENT_TEST = this.currentTest.parent.title + global.CURRENT_TEST;
-    }
-  } else {
-    global.CURRENT_TEST = 'N/A';
-  }
-});
+after(dropDBs);
 
 process.on('unhandledRejection', function(error, promise) {
   if (error.$expected) {

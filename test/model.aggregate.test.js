@@ -9,7 +9,7 @@ const start = require('./common');
 
 const Aggregate = require('../lib/aggregate');
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
@@ -24,7 +24,7 @@ const userSchema = new Schema({
 });
 
 describe('model aggregate', function() {
-  this.timeout(process.env.TRAVIS ? 8000 : 4500);
+  this.timeout(4500);
 
   const group = { $group: { _id: null, maxAge: { $max: '$age' } } };
   const project = { $project: { maxAge: 1, _id: 0 } };

@@ -8,7 +8,7 @@
 const start = require('./common');
 
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
@@ -59,7 +59,7 @@ describe('model: mapreduce:', function() {
   it('works', async function() {
     const MR = db.model('MapReduce', BlogPost);
 
-    const id = new mongoose.Types.ObjectId;
+    const id = new mongoose.Types.ObjectId();
     const authors = 'aaron guillermo brian nathan'.split(' ');
     const num = 10;
     const docs = [];
@@ -174,8 +174,7 @@ describe('model: mapreduce:', function() {
       verbose: false
     };
 
-    const res = await MR.mapReduce(o);
-    console.log(res);
+    assert.deepEqual(await MR.mapReduce(o), []);
     assert.equal(typeof stats, 'undefined');
   });
 
@@ -207,7 +206,7 @@ describe('model: mapreduce:', function() {
       db = start();
       MR = db.model('MapReduce', BlogPost);
 
-      id = new mongoose.Types.ObjectId;
+      id = new mongoose.Types.ObjectId();
       const authors = 'aaron guillermo brian nathan'.split(' ');
       const num = 10;
       for (let i = 0; i < num; ++i) {

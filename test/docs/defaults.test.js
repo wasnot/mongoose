@@ -2,13 +2,14 @@
 
 const assert = require('assert');
 const mongoose = require('../../');
+const start = require('../common');
 
 describe('defaults docs', function() {
   let db;
   const Schema = mongoose.Schema;
 
   before(function() {
-    db = mongoose.createConnection('mongodb://localhost:27017/mongoose_test');
+    db = mongoose.createConnection(start.uri);
   });
 
   after(async function() {
@@ -48,9 +49,9 @@ describe('defaults docs', function() {
     assert.strictEqual(foo.role, null);
 
     await Person.create(axl, slash);
-    
+
     const docs = await Person.find({ role: 'guitarist' });
-    
+
     assert.equal(docs.length, 1);
     assert.equal(docs[0].name, 'Slash');
   });

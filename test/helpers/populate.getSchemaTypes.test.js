@@ -1,9 +1,10 @@
 'use strict';
 
-const Schema = require('../../lib/schema');
 const assert = require('assert');
-const getSchemaTypes = require('../../lib/helpers/populate/getSchemaTypes');
+
 const mongoose = require('../common').mongoose;
+const Schema = require('../../lib/schema');
+const getSchemaTypes = require('../../lib/helpers/populate/getSchemaTypes');
 
 describe('getSchemaTypes', function() {
   it('handles embedded discriminators (gh-5970)', function() {
@@ -177,5 +178,19 @@ describe('getSchemaTypes', function() {
     assert.ok(Array.isArray(schemaTypes));
     assert.equal(schemaTypes.length, 1);
     assert.equal(schemaTypes[0].options.ref, 'Enemy');
+  });
+
+  it('finds path underneath nested subdocument with map of mixed (gh-12530)', function() {
+    const schema = new Schema({
+      child: new Schema({
+        testMap: {
+          type: Map,
+          of: 'Mixed'
+        }
+      })
+    });
+
+    const schemaTypes = getSchemaTypes(null, schema, null, 'child.testMap.foo.bar');
+    assert.equal(schemaTypes.instance, 'Mixed');
   });
 });

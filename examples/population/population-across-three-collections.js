@@ -10,7 +10,7 @@ const ObjectId = mongoose.Types.ObjectId;
  */
 
 const dbname = 'testing_populateAdInfinitum_' + require('../../lib/utils').random();
-mongoose.connect('localhost', dbname);
+mongoose.connect('127.0.0.1', dbname);
 mongoose.connection.on('error', function() {
   console.error('connection error', arguments);
 });
@@ -47,7 +47,7 @@ mongoose.connection.on('open', function() {
    * Generate data
    */
 
-  const userIds = [new ObjectId, new ObjectId, new ObjectId, new ObjectId];
+  const userIds = [new ObjectId(), new ObjectId(), new ObjectId(), new ObjectId()];
   const users = [];
 
   users.push({

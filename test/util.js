@@ -1,23 +1,15 @@
 'use strict';
 
+/**
+ * Generates a random string
+ */
+
+exports.random = function() {
+  return Math.random().toString().substring(3);
+};
+
 exports.clearTestData = function clearTestData(db) {
-  if (db.models == null) {
-    return;
-  }
-
-  const arr = [];
-
-  for (const model of Object.keys(db.models)) {
-    const Model = db.models[model];
-    if (Model.baseModelName != null) {
-      // Skip discriminators
-      continue;
-    }
-    arr.push(db.models[model].deleteMany({}));
-    arr.push(db.models[model].collection.dropIndexes().catch(() => {}));
-  }
-
-  return Promise.all(arr);
+  return db.dropDatabase();
 };
 
 exports.stopRemainingOps = function stopRemainingOps(db) {

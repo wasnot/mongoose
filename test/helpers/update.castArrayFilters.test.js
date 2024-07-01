@@ -2,6 +2,7 @@
 
 const Query = require('../../lib/query');
 const Schema = require('../../lib/schema');
+const Types = require('../../lib/types');
 const assert = require('assert');
 const castArrayFilters = require('../../lib/helpers/update/castArrayFilters');
 
@@ -168,12 +169,35 @@ describe('castArrayFilters', function() {
 
     q.updateOne({}, p, opts);
 
-    q.schema.options.strictQuery = true;
+    q.schema._userProvidedOptions.strictQuery = true;
     assert.throws(function() {
       castArrayFilters(q);
     }, /Could not find path.*in schema/);
 
-    q.schema.options.strictQuery = false;
+    q.schema._userProvidedOptions.strictQuery = false;
+    castArrayFilters(q);
+    assert.strictEqual(q.options.arrayFilters[0]['arr.notInSchema'], '42');
+  });
+
+  it('respects `strict` override (gh-11062)', function() {
+    const schema = new Schema({
+      arr: [{
+        id: Number
+      }]
+    });
+    const q = new Query();
+    q.schema = schema;
+
+    const p = { 'arr.$[arr].id': 42 };
+    const opts = {
+      strict: false,
+      arrayFilters: [
+        { 'arr.notInSchema': '42' }
+      ]
+    };
+
+    q.updateOne({}, p, opts);
+
     castArrayFilters(q);
     assert.strictEqual(q.options.arrayFilters[0]['arr.notInSchema'], '42');
   });
@@ -198,5 +222,93 @@ describe('castArrayFilters', function() {
     castArrayFilters(q);
 
     assert.strictEqual(q.options.arrayFilters[0].$or[0]['arr.id'], 12);
+  });
+
+  it('respects global strictQuery option (gh-11836)', function() {
+    const schema = new Schema({
+      arr: [{
+        id: Number
+      }]
+    });
+    let q = new Query();
+    q.schema = schema;
+    q.model = { base: { Types, options: { strictQuery: false } } };
+
+    let p = { 'arr.$[arr].id': 42 };
+    let opts = {
+      arrayFilters: [
+        { $or: [{ 'arr.notInSchema': '12' }] }
+      ]
+    };
+
+    q.updateOne({}, p, opts);
+    castArrayFilters(q);
+
+    assert.strictEqual(q.options.arrayFilters[0].$or[0]['arr.notInSchema'], '12');
+
+    q = new Query();
+    q.schema = schema;
+    q.model = { base: { Types, options: { strictQuery: true } } };
+
+    p = { 'arr.$[arr].id': 42 };
+    opts = {
+      arrayFilters: [
+        { $or: [{ 'arr.notInSchema': '12' }] }
+      ]
+    };
+
+    q.updateOne({}, p, opts);
+    assert.throws(() => {
+      castArrayFilters(q);
+    }, /Could not find path "arr\.0\.notInSchema" in schema/);
+  });
+
+  it('handles embedded discriminators (gh-12565)', function() {
+    const elementSchema = new Schema(
+      { elementType: String },
+      { discriminatorKey: 'elementType' }
+    );
+    const versionSchema = new Schema(
+      { version: Number, elements: [elementSchema] },
+      { strictQuery: 'throw' }
+    );
+    versionSchema.path('elements').discriminator(
+      'Graph',
+      new Schema({
+        number: Number,
+        curves: [{ line: { label: String, type: String, number: String, latLong: [Number], controller: String } }]
+      })
+    );
+
+    const testSchema = new Schema({ versions: [versionSchema] });
+
+    const q = new Query();
+    q.schema = testSchema;
+
+    const p = {
+      $push: {
+        'versions.$[version].elements.$[element].curves': {
+          line: {
+            label: 'CC110_Ligne 02',
+            type: 'numerique',
+            number: '30',
+            latLong: [44, 8],
+            controller: 'CC110'
+          }
+        }
+      }
+    };
+    const opts = {
+      arrayFilters: [
+        {
+          'element.elementType': 'Graph',
+          'element.number': '1'
+        }
+      ]
+    };
+    q.updateOne({}, p, opts);
+    castArrayFilters(q);
+
+    assert.strictEqual(q.options.arrayFilters[0]['element.number'], 1);
   });
 });

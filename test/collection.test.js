@@ -8,8 +8,18 @@ const assert = require('assert');
 const mongoose = start.mongoose;
 
 describe('collections:', function() {
+  let db = null;
+
+  afterEach(async function() {
+    if (db == null) {
+      return;
+    }
+    await db.close();
+    db = null;
+  });
+
   it('should buffer commands until connection is established', function(done) {
-    const db = mongoose.createConnection();
+    db = mongoose.createConnection();
     const collection = db.collection('test-buffering-collection');
     let connected = false;
     let insertedId = undefined;
@@ -34,7 +44,7 @@ describe('collections:', function() {
       finish();
     });
 
-    const uri = 'mongodb://localhost:27017/mongoose_test';
+    const uri = start.uri;
     db.openUri(process.env.MONGOOSE_TEST_URI || uri, function(err) {
       connected = !err;
       finish();
@@ -42,7 +52,7 @@ describe('collections:', function() {
   });
 
   it('returns a promise if buffering and no callback (gh-7676)', function(done) {
-    const db = mongoose.createConnection();
+    db = mongoose.createConnection();
     const collection = db.collection('gh7676');
 
     const promise = collection.insertOne({ foo: 'bar' }, {})
@@ -52,10 +62,22 @@ describe('collections:', function() {
         assert.strictEqual(doc.foo, 'bar');
       });
 
-    const uri = 'mongodb://localhost:27017/mongoose_test';
-    db.openUri(process.env.MONGOOSE_TEST_URI || uri, function(err) {
+    db.openUri(start.uri, function(err) {
       assert.ifError(err);
       promise.then(() => done(), done);
+    });
+  });
+
+  it('returns a promise if buffering and callback with find() (gh-14184)', function(done) {
+    db = mongoose.createConnection();
+    const collection = db.collection('gh14184');
+    collection.opts.bufferTimeoutMS = 100;
+
+    collection.find({ foo: 'bar' }, {}, (err, docs) => {
+      assert.ok(err);
+      assert.ok(err.message.includes('buffering timed out after 100ms'));
+      assert.equal(docs, undefined);
+      done();
     });
   });
 
@@ -145,7 +167,7 @@ describe('collections:', function() {
   });
 
   it('buffers for sync methods (gh-10610)', function(done) {
-    const db = mongoose.createConnection();
+    db = mongoose.createConnection();
     const collection = db.collection('gh10610');
 
     collection.find({}, {}, function(err, res) {
@@ -154,7 +176,7 @@ describe('collections:', function() {
       done();
     });
 
-    const uri = 'mongodb://localhost:27017/mongoose_test';
+    const uri = start.uri;
     db.openUri(process.env.MONGOOSE_TEST_URI || uri);
   });
 });

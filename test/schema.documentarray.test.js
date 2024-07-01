@@ -34,7 +34,7 @@ describe('schema.documentarray', function() {
     const O = mongoose.model('DefaultDocArrays3', schema3);
 
     [M, N, O].forEach(function(M) {
-      const m = new M;
+      const m = new M();
       assert.ok(Array.isArray(m.x));
       assert.equal(m.x.length, 1);
       assert.equal(m.x[0].title, 'Prometheus');
@@ -75,6 +75,15 @@ describe('schema.documentarray', function() {
     done();
   });
 
+  it('propagates strictQuery to implicitly created schemas (gh-12796)', function() {
+    const schema = new Schema({
+      arr: [{ name: String }]
+    }, { strictQuery: 'throw' });
+
+    assert.equal(schema.childSchemas.length, 1);
+    assert.equal(schema.childSchemas[0].schema.options.strictQuery, 'throw');
+  });
+
   it('supports set with array of document arrays (gh-7799)', function() {
     const subSchema = new Schema({
       title: String
@@ -113,5 +122,43 @@ describe('schema.documentarray', function() {
     assert.ok(!doc.arr[0]._id);
 
     mongoose.Schema.Types.DocumentArray.defaultOptions = {};
+  });
+
+  it('handles default function that returns null (gh-11058)', async function() {
+    const testSchema = new Schema({
+      comments: {
+        type: [{ prop: String }],
+        default: () => null
+      }
+    });
+
+    const value = testSchema.path('comments').getDefault();
+    assert.strictEqual(value, null);
+  });
+
+  it('doValidate() validates entire subdocument (gh-11770)', async function() {
+    mongoose.deleteModel(/Test/);
+
+    const testSchema = new Schema({
+      comments: [{
+        text: {
+          type: String,
+          required: true
+        }
+      }]
+    });
+    const TestModel = mongoose.model('Test', testSchema);
+    const testDoc = new TestModel();
+
+    const err = await new Promise((resolve, reject) => {
+      testSchema.path('comments').$embeddedSchemaType.doValidate({}, err => {
+        if (err != null) {
+          return reject(err);
+        }
+        resolve();
+      }, testDoc.comments, { index: 1 });
+    }).then(() => null, err => err);
+    assert.equal(err.name, 'ValidationError');
+    assert.equal(err.message, 'Validation failed: text: Path `text` is required.');
   });
 });

@@ -13,7 +13,7 @@ describe('Lean Tutorial', function() {
     const schema = new mongoose.Schema({ name: String });
     MyModel = mongoose.model('Test1', schema);
 
-    return mongoose.connect('mongodb://localhost:27017/mongoose');
+    return mongoose.connect(start.uri);
   });
 
   beforeEach(function() {
@@ -21,29 +21,36 @@ describe('Lean Tutorial', function() {
     mongoose.deleteModel(/Group/);
   });
 
+  after(async() => {
+    await mongoose.disconnect();
+  });
+
   it('compare sizes lean vs not lean', async function() {
+    // acquit:ignore:start
+    if (typeof Deno !== 'undefined') {
+      return this.skip(); // Deno does not support v8.serialize()
+    }
+    const v8Serialize = require('v8').serialize;
+    // acquit:ignore:end
     const schema = new mongoose.Schema({ name: String });
     const MyModel = mongoose.model('Test', schema);
 
     await MyModel.create({ name: 'test' });
 
-    // Module that estimates the size of an object in memory
-    const sizeof = require('object-sizeof');
-
     const normalDoc = await MyModel.findOne();
     // To enable the `lean` option for a query, use the `lean()` function.
     const leanDoc = await MyModel.findOne().lean();
 
-    sizeof(normalDoc); // approximately 600
-    sizeof(leanDoc); // 36, more than 10x smaller!
+    v8Serialize(normalDoc).length; // approximately 180
+    v8Serialize(leanDoc).length; // 32, about 5x smaller!
 
     // In case you were wondering, the JSON form of a Mongoose doc is the same
     // as the POJO. This additional memory only affects how much memory your
     // Node.js process uses, not how much data is sent over the network.
-    JSON.stringify(normalDoc).length === JSON.stringify(leanDoc.length); // true
+    JSON.stringify(normalDoc).length === JSON.stringify(leanDoc).length; // true
     // acquit:ignore:start
-    assert.ok(sizeof(normalDoc) >= 400 && sizeof(normalDoc) <= 800, sizeof(normalDoc));
-    assert.equal(sizeof(leanDoc), 36);
+    assert.ok(v8Serialize(normalDoc).length >= 150 && v8Serialize(normalDoc).length <= 200, v8Serialize(normalDoc).length);
+    assert.equal(v8Serialize(leanDoc).length, 32);
     assert.equal(JSON.stringify(normalDoc).length, JSON.stringify(leanDoc).length);
     // acquit:ignore:end
   });
@@ -86,7 +93,7 @@ describe('Lean Tutorial', function() {
     });
     function capitalizeFirstLetter(v) {
       // Convert 'bob' -> 'Bob'
-      return v.charAt(0).toUpperCase() + v.substr(1);
+      return v.charAt(0).toUpperCase() + v.substring(1);
     }
     const Person = mongoose.model('Person', personSchema);
     // acquit:ignore:start
@@ -174,7 +181,7 @@ describe('Lean Tutorial', function() {
 
     // Initialize data
     const g = await Group.create({ name: 'DS9 Characters' });
-    const people = await Person.create([
+    await Person.create([
       { name: 'Benjamin Sisko', groupId: g._id },
       { name: 'Kira Nerys', groupId: g._id }
     ]);

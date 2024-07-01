@@ -45,7 +45,7 @@ const data = [
 ];
 
 
-mongoose.connect('mongodb://localhost/persons', function(err) {
+mongoose.connect('mongodb://127.0.0.1/persons', function(err) {
   if (err) throw err;
 
   // create all of the dummy people
@@ -86,7 +86,7 @@ mongoose.connect('mongodb://localhost/persons', function(err) {
     o.verbose = true; // default is false, provide stats on the job
     // o.out = {}; // objects to specify where output goes, by default is
     // returned, but can also be stored in a new collection
-    // see: http://mongoosejs.com/docs/api.html#model_Model.mapReduce
+    // see: http://mongoosejs.com/docs/api/model.html#model_Model-mapReduce
     Person.mapReduce(o, function(err, results, stats) {
       console.log('map reduce took %d ms', stats.processtime);
       console.log(results);

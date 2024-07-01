@@ -1,36 +1,38 @@
 'use strict';
 
+const sinon = require('sinon');
+
 const start = require('./common');
 
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 const stream = require('stream');
+const { EventEmitter } = require('events');
 
 const collection = 'blogposts_' + random();
 
+const SetOptionError = require('../lib/error/setOptionError');
 const mongoose = start.mongoose;
 const Mongoose = mongoose.Mongoose;
 const Schema = mongoose.Schema;
-
-const uri = 'mongodb://localhost:27017/mongoose_test';
 
 const options = {};
 
 describe('mongoose module:', function() {
   describe('default connection works', function() {
     it('without options', async function() {
-      const goose = new Mongoose;
+      const goose = new Mongoose();
       const db = goose.connection;
 
-      await goose.connect(process.env.MONGOOSE_TEST_URI || uri, options);
+      await goose.connect(start.uri, options);
       await db.close();
     });
 
     it('with promise (gh-3790)', async function() {
-      const goose = new Mongoose;
+      const goose = new Mongoose();
       const db = goose.connection;
 
-      await goose.connect(process.env.MONGOOSE_TEST_URI || uri, options);
+      await goose.connect(start.uri, options);
 
       await db.close();
     });
@@ -82,10 +84,24 @@ describe('mongoose module:', function() {
     const User = mongoose.model('User', new Schema({ name: String }));
 
 
-    await mongoose.connect(uri);
+    await mongoose.connect(start.uri);
     await User.findOne();
     assert.equal(written.length, 1);
     assert.ok(written[0].startsWith('users.findOne('));
+    await mongoose.disconnect();
+  });
+
+  it('should collect the args correctly gh-13364', async function() {
+    const util = require('util');
+    const mongoose = new Mongoose();
+    const conn = await mongoose.connect(start.uri);
+    let actual = '';
+    mongoose.set('debug', (collectionName, methodName, ...methodArgs) => {
+      actual = `${collectionName}.${methodName}(${util.inspect(methodArgs).slice(2, -2)})`;
+    });
+    const user = conn.connection.collection('User');
+    await user.findOne({ key: 'value' });
+    assert.equal('User.findOne({ key: \'value\' })', actual);
   });
 
   it('{g,s}etting options', function() {
@@ -178,7 +194,7 @@ describe('mongoose module:', function() {
     assert.strictEqual(o._id, o);
   });
 
-  it('runValidators option (gh-6865) (gh-6578)', function() {
+  it('runValidators option (gh-6865) (gh-6578)', async function() {
     const mongoose = new Mongoose();
 
     mongoose.set('runValidators', true);
@@ -187,13 +203,12 @@ describe('mongoose module:', function() {
       name: { type: String, required: true }
     }));
 
-    return mongoose.connect(uri, options).
-      then(() => M.updateOne({}, { name: null })).
-      then(
-        () => assert.ok(false),
-        err => assert.ok(err.errors['name'])
-      ).
-      then(() => mongoose.disconnect());
+    await mongoose.connect(start.uri, options);
+
+    const err = await M.updateOne({}, { name: null }).then(() => null, err => err);
+    assert.ok(err.errors['name']);
+
+    mongoose.disconnect();
   });
 
   it('toJSON options (gh-6815)', function() {
@@ -319,6 +334,41 @@ describe('mongoose module:', function() {
     await mong.disconnect();
   });
 
+  it('declaring global plugins with tags (gh-9780)', async function() {
+    const mong = new Mongoose();
+    const schema1 = new Schema({}, { pluginTags: ['tag1'] });
+    const schema2 = new Schema({}, { pluginTags: ['tag2'] });
+    const schema3 = new Schema({});
+
+    mong.plugin(function(s) {
+      s.add({ prop1: String });
+    }, { tags: ['tag1'] });
+
+    mong.plugin(function(s) {
+      s.add({ prop2: String });
+    }, { tags: ['tag1', 'tag2'] });
+
+    mong.plugin(function(s) {
+      s.add({ prop3: String });
+    });
+
+    const Test1 = mong.model('Test1', schema1);
+    const Test2 = mong.model('Test2', schema2);
+    const Test3 = mong.model('Test3', schema3);
+
+    assert.ok(Test1.schema.path('prop1'));
+    assert.ok(Test1.schema.path('prop2'));
+    assert.ok(Test1.schema.path('prop3'));
+
+    assert.ok(!Test2.schema.path('prop1'));
+    assert.ok(Test2.schema.path('prop2'));
+    assert.ok(Test2.schema.path('prop3'));
+
+    assert.ok(!Test3.schema.path('prop1'));
+    assert.ok(!Test3.schema.path('prop2'));
+    assert.ok(Test3.schema.path('prop3'));
+  });
+
   it('global plugins on nested schemas underneath embedded discriminators (gh-7370)', function() {
     const m = new Mongoose();
 
@@ -380,6 +430,25 @@ describe('mongoose module:', function() {
     return Promise.resolve();
   });
 
+  it('global plugins with applyPluginsToChildSchemas (gh-13887)', function() {
+    const m = new Mongoose();
+    m.set('applyPluginsToChildSchemas', false);
+
+    const called = [];
+    m.plugin(function(s) {
+      called.push(s);
+    });
+
+    const schema = new m.Schema({
+      subdoc: new m.Schema({ name: String }),
+      arr: [new m.Schema({ name: String })]
+    });
+
+    m.model('Test', schema);
+    assert.equal(called.length, 1);
+    assert.ok(called.indexOf(schema) !== -1);
+  });
+
   it('global plugins recompile schemas (gh-7572)', function() {
     function helloPlugin(schema) {
       schema.virtual('greeting').get(() => 'hello');
@@ -435,7 +504,7 @@ describe('mongoose module:', function() {
     const M = mongoose.model('gh6728', schema);
 
 
-    await mongoose.connect(uri);
+    await mongoose.connect(start.uri);
 
     const doc = new M({ name: 'foo' });
 
@@ -443,6 +512,7 @@ describe('mongoose module:', function() {
 
     assert.equal(doc.createdAt.valueOf(), date.valueOf());
     assert.equal(doc.updatedAt.valueOf(), date.valueOf());
+    await mongoose.disconnect();
   });
 
   it('isolates custom types between mongoose instances (gh-6933) (gh-7158)', function() {
@@ -465,16 +535,13 @@ describe('mongoose module:', function() {
   });
 
   it('throws an error on setting invalid options (gh-6899)', function() {
-    let threw = false;
     try {
       mongoose.set('someInvalidOption', true);
+      assert.fail('Expected mongoose.set to throw');
     }
     catch (err) {
-      assert.equal(err.message, '`someInvalidOption` is an invalid option.');
-      threw = true;
-    }
-    finally {
-      assert.equal(threw, true);
+      assert.ok(err instanceof SetOptionError);
+      assert.equal(err.message, 'someInvalidOption: "someInvalidOption" is not a valid option to set');
     }
   });
 
@@ -488,7 +555,7 @@ describe('mongoose module:', function() {
         let disconnections = 0;
         let pending = 4;
 
-        mong.connect(process.env.MONGOOSE_TEST_URI || uri, options);
+        mong.connect(start.uri, options);
         const db = mong.connection;
 
         function cb() {
@@ -511,7 +578,7 @@ describe('mongoose module:', function() {
         const events = [];
         mong.events.on('createConnection', conn => events.push(conn));
 
-        const db2 = mong.createConnection(process.env.MONGOOSE_TEST_URI || uri, options);
+        const db2 = mong.createConnection(start.uri, options);
 
         assert.equal(events.length, 1);
         assert.equal(events[0], db2);
@@ -533,7 +600,7 @@ describe('mongoose module:', function() {
     it('with callback', function(done) {
       const mong = new Mongoose();
 
-      mong.connect(process.env.MONGOOSE_TEST_URI || uri, options);
+      mong.connect(start.uri, options);
 
       mong.connection.on('open', function() {
         mong.disconnect(function() {
@@ -545,7 +612,7 @@ describe('mongoose module:', function() {
     it('with promise (gh-3790)', function(done) {
       const _mongoose = new Mongoose();
 
-      _mongoose.connect(process.env.MONGOOSE_TEST_URI || uri, options);
+      _mongoose.connect(start.uri, options);
 
       _mongoose.connection.on('open', function() {
         _mongoose.disconnect().then(function() { done(); });
@@ -582,17 +649,17 @@ describe('mongoose module:', function() {
     });
 
     it('prevents overwriting pre-existing models', function() {
-      const m = new Mongoose;
-      m.model('A', new Schema);
+      const m = new Mongoose();
+      m.model('A', new Schema());
 
       assert.throws(function() {
-        m.model('A', new Schema);
+        m.model('A', new Schema());
       }, /Cannot overwrite `A` model/);
     });
 
     it('allows passing identical name + schema args', function() {
-      const m = new Mongoose;
-      const schema = new Schema;
+      const m = new Mongoose();
+      const schema = new Schema();
       const model = m.model('A', schema);
 
       assert.doesNotThrow(function() {
@@ -603,8 +670,8 @@ describe('mongoose module:', function() {
     });
 
     it('allows passing identical name+schema+collection args (gh-5767)', function() {
-      const m = new Mongoose;
-      const schema = new Schema;
+      const m = new Mongoose();
+      const schema = new Schema();
       const model = m.model('A', schema, 'AA');
 
       assert.doesNotThrow(function() {
@@ -623,7 +690,7 @@ describe('mongoose module:', function() {
     describe('passing collection name', function() {
       describe('when model name already exists', function() {
         it('returns a new uncached model', function() {
-          const m = new Mongoose;
+          const m = new Mongoose();
           const s1 = new Schema({ a: [] });
           const name = 'Test';
           const A = m.model(name, s1);
@@ -639,12 +706,20 @@ describe('mongoose module:', function() {
 
     describe('passing object literal schemas', function() {
       it('works', function() {
-        const m = new Mongoose;
+        const m = new Mongoose();
         const A = m.model('A', { n: [{ age: 'number' }] });
         const a = new A({ n: [{ age: '47' }] });
         assert.strictEqual(47, a.n[0].age);
       });
     });
+  });
+
+  it('clones schema when instance of another Mongoose instance\'s Schema class (gh-11047)', function() {
+    const m = new Mongoose();
+    const schema = new Schema({ name: String });
+
+    const Test = m.connection.model('Test', schema);
+    assert.equal(Test.schema.obj.name, String);
   });
 
   it('deleteModel()', function() {
@@ -667,20 +742,19 @@ describe('mongoose module:', function() {
     it('with single mongod', async function() {
       const mong = new Mongoose();
 
-      await mong.connect(uri, options);
+      await mong.connect(start.uri, options);
 
       await mong.connection.close();
     });
 
     it('with replica set', async function() {
       const mong = new Mongoose();
-      const uri = process.env.MONGOOSE_SET_TEST_URI;
 
-      if (!uri) {
-        return;
+      if (!start.uri) {
+        return this.skip();
       }
 
-      await mong.connect(uri, options);
+      await mong.connect(start.uri, options);
 
       await mong.connection.close();
     });
@@ -691,7 +765,82 @@ describe('mongoose module:', function() {
     assert.ok(mongoose.isValidObjectId('5f5c2d56f6e911019ec2acdc'));
     assert.ok(mongoose.isValidObjectId('608DE01F32B6A93BBA314159'));
     assert.ok(mongoose.isValidObjectId(new mongoose.Types.ObjectId()));
-    assert.ok(!mongoose.isValidObjectId(6));
+    assert.ok(mongoose.isValidObjectId(6));
+    assert.ok(!mongoose.isValidObjectId({ test: 42 }));
+  });
+
+  it('isObjectIdOrHexString (gh-11419)', function() {
+    assert.ok(!mongoose.isObjectIdOrHexString('0123456789ab'));
+    assert.ok(mongoose.isObjectIdOrHexString('5f5c2d56f6e911019ec2acdc'));
+    assert.ok(mongoose.isObjectIdOrHexString('608DE01F32B6A93BBA314159'));
+    assert.ok(mongoose.isObjectIdOrHexString(new mongoose.Types.ObjectId()));
+    assert.ok(!mongoose.isObjectIdOrHexString(6));
+    assert.ok(!mongoose.isValidObjectId({ test: 42 }));
+  });
+
+  it('global `strictPopulate` works when false (gh-10694)', async function() {
+    const mongoose = new Mongoose();
+    mongoose.set('strictPopulate', false);
+    const schema = new mongoose.Schema({ name: String });
+    const db = await mongoose.connect(start.uri);
+    const Movie = db.model('Movie', schema);
+    const Person = db.model('Person', new mongoose.Schema({
+      name: String
+    }));
+
+    const movie = await Movie.create({ name: 'The Empire Strikes Back' });
+    await Person.create({ name: 'Test1', favoriteMovie: movie._id });
+    const entry = await Person.findOne().populate({ path: 'favoriteMovie' });
+    assert(entry);
+    await mongoose.disconnect();
+  });
+  it('global `strictPopulate` works when true (gh-10694)', async function() {
+    const mongoose = new Mongoose();
+    mongoose.set('strictPopulate', true);
+    const schema = new mongoose.Schema({ name: String });
+    const db = await mongoose.connect(start.uri);
+    const Movie = db.model('Movie', schema);
+    const Person = db.model('Person', new mongoose.Schema({
+      name: String
+    }));
+
+    const movie = await Movie.create({ name: 'The Empire Strikes Back' });
+    await Person.create({ name: 'Test1', favoriteMovie: movie._id });
+    await assert.rejects(async() => {
+      await Person.findOne().populate({ path: 'favoriteGame' });
+    }, { message: 'Cannot populate path `favoriteGame` because it is not in your schema. Set the `strictPopulate` option to false to override.' });
+    await mongoose.disconnect();
+  });
+  it('allows global `strictPopulate` to be overriden on specific queries set to true (gh-10694)', async function() {
+    const mongoose = new Mongoose();
+    mongoose.set('strictPopulate', false);
+    const schema = new mongoose.Schema({ name: String });
+    const db = await mongoose.connect(start.uri);
+    const Movie = db.model('Movie', schema);
+    const Person = db.model('Person', new mongoose.Schema({
+      name: String
+    }));
+    const movie = await Movie.create({ name: 'The Empire Strikes Back' });
+    await Person.create({ name: 'Test1', favoriteMovie: movie._id });
+    await assert.rejects(async() => {
+      await Person.findOne().populate({ path: 'favoriteGame', strictPopulate: true });
+    }, { message: 'Cannot populate path `favoriteGame` because it is not in your schema. Set the `strictPopulate` option to false to override.' });
+    await mongoose.disconnect();
+  });
+  it('allows global `strictPopulate` to be overriden on specific queries set to false (gh-10694)', async function() {
+    const mongoose = new Mongoose();
+    mongoose.set('strictPopulate', false);
+    const schema = new mongoose.Schema({ name: String });
+    const db = await mongoose.connect(start.uri);
+    const Movie = db.model('Movie', schema);
+    const Person = db.model('Person', new mongoose.Schema({
+      name: String
+    }));
+    const movie = await Movie.create({ name: 'The Empire Strikes Back' });
+    await Person.create({ name: 'Test1', favoriteMovie: movie._id });
+    const entry = await Person.findOne().populate({ path: 'favoriteMovie' });
+    assert(entry);
+    await mongoose.disconnect();
   });
 
   describe('exports', function() {
@@ -719,21 +868,21 @@ describe('mongoose module:', function() {
     });
 
     it('of new Mongoose instances', function() {
-      test(new mongoose.Mongoose);
+      test(new mongoose.Mongoose());
     });
 
     it('of result from .connect() (gh-3940)', async function() {
-      const m = new mongoose.Mongoose;
-      const resolvedMongoose = await m.connect('mongodb://localhost:27017/test', options);
+      const m = new mongoose.Mongoose();
+      const resolvedMongoose = await m.connect(start.uri, options);
 
       test(resolvedMongoose);
       await m.disconnect();
     });
 
-    it('connect with url doesnt cause unhandled rejection (gh-6997)', function() {
-      const m = new mongoose.Mongoose;
+    it('connect with url doesnt cause unhandled rejection (gh-6997)', async function() {
+      const m = new mongoose.Mongoose();
       const _options = Object.assign({}, options, { serverSelectionTimeoutMS: 100 });
-      const error = m.connect('mongodb://doesnotexist:27009/test', _options).then(() => null, err => err);
+      const error = await m.connect('mongodb://doesnotexist:27009/test', _options).then(() => null, err => err);
 
       assert.ok(error);
     });
@@ -741,7 +890,7 @@ describe('mongoose module:', function() {
     it('can set `setDefaultsOnInsert` as a global option (gh-9032)', async function() {
       const m = new mongoose.Mongoose();
       m.set('setDefaultsOnInsert', true);
-      const db = await m.connect('mongodb://localhost:27017/mongoose_test_9032');
+      const db = await m.connect(start.uri);
 
       const schema = new m.Schema({
         title: String,
@@ -760,13 +909,14 @@ describe('mongoose module:', function() {
       // lean is necessary to avoid defaults by casting
       const movie = await Movie.findOne({ title: 'Cloud Atlas' }).lean();
       assert.equal(movie.genre, 'Action');
+      await m.disconnect();
     });
 
     it('setting `setDefaultOnInsert` on operation has priority over base option (gh-9032)', async function() {
       const m = new mongoose.Mongoose();
       m.set('setDefaultsOnInsert', true);
 
-      const db = await m.connect('mongodb://localhost:27017/mongoose_test_9032');
+      const db = await m.connect(start.uri);
 
       const schema = new m.Schema({
         title: String,
@@ -785,6 +935,7 @@ describe('mongoose module:', function() {
       // lean is necessary to avoid defaults by casting
       const movie = await Movie.findOne({ title: 'The Man From Earth' }).lean();
       assert.ok(!movie.genre);
+      await m.disconnect();
     });
     it('should prevent non-hexadecimal strings (gh-9996)', function() {
       const badIdString = 'z'.repeat(24);
@@ -793,6 +944,284 @@ describe('mongoose module:', function() {
       assert.deepStrictEqual(mongoose.isValidObjectId(goodIdString), true);
       const goodIdString2 = '1'.repeat(12);
       assert.deepStrictEqual(mongoose.isValidObjectId(goodIdString2), true);
+    });
+    it('Allows a syncIndexes shorthand mongoose.syncIndexes (gh-10893)', async function() {
+      const m = new mongoose.Mongoose();
+      assert.deepEqual(await m.syncIndexes(), {});
+    });
+
+    it('Allows for the removal of indexes via string or object (gh-11547)', async function() {
+      const schema = new Schema({
+        title: String,
+        weight: Number,
+        age: Number,
+        name: String,
+        location: String
+      });
+
+      schema.index({ title: 1 }, { name: 'title index' });
+      schema.index({ weight: 1 });
+      schema.index({ age: 1, name: 1 });
+      schema.index({ location: 1 });
+      assert.equal(schema._indexes.length, 4);
+
+      schema.removeIndex('title index');
+      assert.equal(schema.indexes().length, 3);
+      assert.deepStrictEqual(
+        schema.indexes().map(i => i[0]),
+        [{ weight: 1 }, { age: 1, name: 1 }, { location: 1 }]
+      );
+
+      schema.removeIndex({ age: 1, name: 1 });
+      assert.equal(schema.indexes().length, 2);
+      assert.deepStrictEqual(
+        schema.indexes().map(i => i[0]),
+        [{ weight: 1 }, { location: 1 }]
+      );
+
+      schema.removeIndex({ weight: 1 });
+      assert.equal(schema.indexes().length, 1);
+      assert.deepStrictEqual(schema.indexes().map(i => i[0]), [{ location: 1 }]);
+
+      schema.clearIndexes();
+      assert.equal(schema.indexes().length, 0);
+    });
+
+    describe('global `allowDiskUse` (gh-11478)', () => {
+      this.afterEach(() => sinon.restore());
+
+      it('is `undefined` by default', async() => {
+        // Arrange
+        const m = new mongoose.Mongoose();
+
+        const db = await m.connect(start.uri);
+
+        const userSchema = new m.Schema({
+          name: String
+        });
+
+        const User = db.model('User', userSchema);
+
+        const nativeAggregateSpy = sinon.spy(User.collection, 'aggregate');
+
+        // Act
+        await User.aggregate([{ $match: {} }]);
+
+        // Assert
+        const optionsSentToMongo = nativeAggregateSpy.args[0][1];
+        assert.strictEqual(optionsSentToMongo.allowDiskUse, undefined);
+        await m.disconnect();
+      });
+
+      it('works when set to `true` and no option provided', async() => {
+        // Arrange
+        const m = new mongoose.Mongoose();
+        m.set('allowDiskUse', true);
+
+        const db = await m.connect(start.uri);
+
+        const userSchema = new m.Schema({
+          name: String
+        });
+
+        const User = db.model('User', userSchema);
+        const nativeAggregateSpy = sinon.spy(User.collection, 'aggregate');
+
+        // Act
+        await User.aggregate([{ $match: {} }]);
+
+        // Assert
+        const optionsSentToMongo = nativeAggregateSpy.args[0][1];
+        assert.strictEqual(optionsSentToMongo.allowDiskUse, true);
+        await m.disconnect();
+      });
+      it('can be overridden by a specific query', async() => {
+        // Arrange
+        const m = new mongoose.Mongoose();
+        m.set('allowDiskUse', true);
+
+        const db = await m.connect(start.uri);
+
+        const userSchema = new m.Schema({
+          name: String
+        });
+
+        const User = db.model('User', userSchema);
+        const nativeAggregateSpy = sinon.spy(User.collection, 'aggregate');
+
+        // Act
+        await User.aggregate([{ $match: {} }]).allowDiskUse(false);
+
+        // Assert
+        const optionsSentToMongo = nativeAggregateSpy.args[0][1];
+        assert.equal(optionsSentToMongo.allowDiskUse, false);
+        await m.disconnect();
+      });
+    });
+    describe('global `timestamps.createdAt.immutable` (gh-10139)', () => {
+      it('is `true` by default', () => {
+        // Arrange
+        const m = new mongoose.Mongoose();
+
+        // Act
+        const userSchema = new m.Schema({ name: String }, { timestamps: true });
+
+        // Assert
+        assert.equal(userSchema.path('createdAt').options.immutable, true);
+      });
+
+      it('can be overridden to `false`', () => {
+        // Arrange
+        const m = new mongoose.Mongoose();
+        m.set('timestamps.createdAt.immutable', false);
+
+        // Act
+        const userSchema = new m.Schema({ name: String }, { timestamps: true });
+
+        // Assert
+        assert.equal(userSchema.path('createdAt').options.immutable, false);
+      });
+    });
+  });
+
+  describe('custom drivers', function() {
+    it('can set custom driver (gh-11900)', async function() {
+      const m = new mongoose.Mongoose();
+
+      class Collection {
+        findOne(filter, options, cb) {
+          cb(null, { answer: 42 });
+        }
+      }
+      class Connection extends EventEmitter {
+        constructor(base) {
+          super();
+          this.base = base;
+          this.models = {};
+        }
+
+        collection() {
+          return new Collection();
+        }
+
+        openUri(uri, opts, callback) {
+          this.readyState = mongoose.ConnectionStates.connected;
+          callback();
+        }
+      }
+      const driver = {
+        Collection,
+        getConnection: () => Connection
+      };
+
+      m.setDriver(driver);
+
+      await m.connect();
+
+      const Test = m.model('Test', m.Schema({ answer: Number }));
+
+      const res = await Test.findOne();
+      assert.deepEqual(res.toObject(), { answer: 42 });
+    });
+  });
+  describe('global id option', function() {
+    it('can disable the id virtual on schemas gh-11966', async function() {
+      const m = new mongoose.Mongoose();
+      m.set('id', false);
+
+      const db = await m.connect(start.uri);
+
+      const schema = new m.Schema({ title: String });
+
+      const falseID = db.model('gh11966', schema);
+
+
+      const entry = await falseID.create({
+        title: 'The IDless master'
+      });
+      assert.equal(entry.id, undefined);
+      await m.disconnect();
+    });
+  });
+
+  describe('set()', function() {
+    let m;
+
+    beforeEach(() => {
+      m = new mongoose.Mongoose();
+    });
+
+    it('should be able to set a option through set with (key, value)', function() {
+      // also test the getter behavior of the function
+      assert.strictEqual(m.options['debug'], undefined);
+      assert.strictEqual(m.set('debug'), undefined);
+      m.set('debug', true);
+
+      assert.strictEqual(m.options['debug'], true);
+      assert.strictEqual(m.set('debug'), true);
+    });
+
+    it('should be able to set a option through a object with {key: value}', function() {
+      assert.strictEqual(m.options['debug'], undefined);
+      m.set({ debug: true });
+
+      assert.strictEqual(m.options['debug'], true);
+    });
+
+    it('should throw a single error when using a invalid key', function() {
+      try {
+        m.set('invalid', true);
+        assert.fail('Expected .set to throw');
+      } catch (err) {
+        assert.ok(err instanceof SetOptionError);
+        assert.strictEqual(Object.keys(err.errors).length, 1);
+        assert.strictEqual(err.message, 'invalid: "invalid" is not a valid option to set');
+      }
+    });
+
+    it('should throw a error with many errors when using multiple invalid keys', function() {
+      try {
+        m.set({
+          invalid1: true,
+          invalid2: true
+        });
+        assert.fail('Expected .set to throw');
+      } catch (err) {
+        assert.ok(err instanceof SetOptionError);
+        assert.strictEqual(Object.keys(err.errors).length, 2);
+        assert.strictEqual(err.message, 'invalid1: "invalid1" is not a valid option to set, invalid2: "invalid2" is not a valid option to set');
+        assert.ok(err.errors['invalid1'] instanceof SetOptionError.SetOptionInnerError);
+        assert.strictEqual(err.errors['invalid1'].message, '"invalid1" is not a valid option to set');
+        assert.ok(err.errors['invalid2'] instanceof SetOptionError.SetOptionInnerError);
+        assert.strictEqual(err.errors['invalid2'].message, '"invalid2" is not a valid option to set');
+      }
+    });
+
+    it('should apply all values, even if there are errors', function() {
+      assert.strictEqual(m.options['debug'], undefined);
+      try {
+        m.set({
+          invalid: true,
+          debug: true
+        });
+        assert.fail('Expected .set to throw');
+      } catch (err) {
+        assert.ok(err instanceof SetOptionError);
+        assert.ok(err.errors['invalid'] instanceof SetOptionError.SetOptionInnerError);
+        assert.strictEqual(err.message, 'invalid: "invalid" is not a valid option to set');
+        assert.strictEqual(m.options['debug'], true);
+      }
+    });
+
+    it('should throw a single error when using a invalid key when getting', function() {
+      try {
+        m.set('invalid');
+        assert.fail('Expected .set to throw');
+      } catch (err) {
+        assert.ok(err instanceof SetOptionError);
+        assert.ok(err.errors['invalid'] instanceof SetOptionError.SetOptionInnerError);
+        assert.strictEqual(err.message, 'invalid: "invalid" is not a valid option to set');
+      }
     });
   });
 });

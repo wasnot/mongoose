@@ -82,14 +82,14 @@ describe('model: update:', function() {
   });
 
   beforeEach(function() {
-    id0 = new DocumentObjectId;
-    id1 = new DocumentObjectId;
+    id0 = new DocumentObjectId();
+    id1 = new DocumentObjectId();
 
-    post = new BlogPost;
+    post = new BlogPost();
     post.set('title', title);
     post.author = author;
     post.meta.visitors = 0;
-    post.date = new Date;
+    post.date = new Date();
     post.published = true;
     post.mixed = { x: 'ex' };
     post.numbers = [4, 5, 6, 7];
@@ -127,7 +127,7 @@ describe('model: update:', function() {
       const update = {
         title: newTitle, // becomes $set
         $inc: { 'meta.visitors': 2 },
-        $set: { date: new Date },
+        $set: { date: new Date() },
         published: false, // becomes $set
         mixed: { x: 'ECKS', y: 'why' }, // $set
         $pullAll: { numbers: [4, 6] },
@@ -227,7 +227,7 @@ describe('model: update:', function() {
       BlogPost.collection.findOne({ _id: post._id }, function(err, doc) {
         assert.ifError(err);
 
-        const up = new BlogPost;
+        const up = new BlogPost();
         up.init(doc);
         assert.equal(up.comments.length, 1);
         assert.equal(up.comments[0].body, 'worked great');
@@ -255,7 +255,7 @@ describe('model: update:', function() {
     a.prototype.toString = function() {
       return 'MongoDB++';
     };
-    const crazy = new a;
+    const crazy = new a();
 
     const update = {
       $addToSet: { 'comments.$.comments': { body: 'The Ring Of Power' } },
@@ -291,7 +291,7 @@ describe('model: update:', function() {
     it('handles date casting (gh-479)', function(done) {
       const update = {
         $inc: { 'comments.$.newprop': '1' },
-        $set: { date: (new Date).getTime() } // check for single val casting
+        $set: { date: (new Date()).getTime() } // check for single val casting
       };
 
       BlogPost.update({ _id: post._id, 'comments.body': 'been there' }, update, { strict: false }, function(err) {
@@ -330,7 +330,7 @@ describe('model: update:', function() {
 
     it('handles $addToSet with $each (gh-545)', function(done) {
       const owner = post.owners[0];
-      const newowner = new DocumentObjectId;
+      const newowner = new DocumentObjectId();
       const numOwners = post.owners.length;
 
       const update = {
@@ -461,7 +461,7 @@ describe('model: update:', function() {
   it('updates numbers atomically', function(done) {
     let totalDocs = 4;
 
-    const post = new BlogPost;
+    const post = new BlogPost();
     post.set('meta.visitors', 5);
 
     function complete() {
@@ -1917,7 +1917,7 @@ describe('model: update:', function() {
       const opts = { new: true, runValidators: true };
       Model.findOneAndUpdate({}, update, opts, function(error) {
         assert.ok(error);
-        assert.ok(error.errors['children']);
+        assert.ok(error.errors['children.lastName']);
         done();
       });
     });
@@ -2021,6 +2021,37 @@ describe('model: update:', function() {
           done();
         }).
         catch(done);
+    });
+
+    it('handles $set on document array in discriminator with runValidators (gh-12518)', async function() {
+      const options = { discriminatorKey: 'kind', runValidators: true };
+
+      const countrySchema = new mongoose.Schema({ title: String }, options);
+      const areasSubSchema = new mongoose.Schema({ country: [countrySchema] }, options);
+      const WorldSchema = new mongoose.Schema({ areas: areasSubSchema }, options);
+
+      const World = db.model(
+        'World',
+        new mongoose.Schema({ title: String }, options)
+      );
+      const Earth = World.discriminator('Earth', WorldSchema);
+
+      const data = {
+        areas: {
+          country: [
+            {
+              title: 'titlec'
+            }
+          ]
+        }
+      };
+      await Earth.updateOne(
+        { _id: mongoose.Types.ObjectId() },
+        data,
+        {
+          runValidators: true
+        }
+      );
     });
 
     it('single nested schema with geo (gh-4465)', function(done) {
@@ -2383,9 +2414,9 @@ describe('model: update:', function() {
 
       Parent.update({}, { d: { d2: 'test' } }, { runValidators: true }, function(error) {
         assert.ok(error);
-        assert.ok(error.errors['d']);
-        assert.ok(error.errors['d'].message.indexOf('Path `d1` is required') !== -1,
-          error.errors['d'].message);
+        assert.ok(error.errors['d.d1']);
+        assert.ok(error.errors['d.d1'].message.indexOf('Path `d1` is required') !== -1,
+          error.errors['d.d1'].message);
         done();
       });
     });
@@ -2646,7 +2677,7 @@ describe('model: update:', function() {
 
       const Test = db.model('Test', schema);
 
-      const test = new Test;
+      const test = new Test();
 
       await test.save();
       const cond = { _id: test._id };
@@ -2768,7 +2799,7 @@ describe('model: update:', function() {
       return Test.update({}, { total: 10000, capitalGainsTax: 1500 });
     });
 
-    it('cast error in update conditions (gh-5477)', function(done) {
+    it('cast error in update conditions (gh-5477)', async function() {
       const schema = new mongoose.Schema({
         name: String
       }, { strict: true });
@@ -2778,28 +2809,15 @@ describe('model: update:', function() {
       const u = { $set: { name: 'Test' } };
       const o = { upsert: true };
 
-      let outstanding = 3;
+      let error = await Model.update(q, u, o).then(() => null, err => err);
+      assert.ok(error);
+      assert.ok(error.message.indexOf('notAField') !== -1, error.message);
+      assert.ok(error.message.indexOf('upsert') !== -1, error.message);
 
-      Model.update(q, u, o, function(error) {
-        assert.ok(error);
-        assert.ok(error.message.indexOf('notAField') !== -1, error.message);
-        assert.ok(error.message.indexOf('upsert') !== -1, error.message);
-        --outstanding || done();
-      });
-
-      Model.update(q, u, o, function(error) {
-        assert.ok(error);
-        assert.ok(error.message.indexOf('notAField') !== -1, error.message);
-        assert.ok(error.message.indexOf('upsert') !== -1, error.message);
-        --outstanding || done();
-      });
-
-      Model.updateMany(q, u, o, function(error) {
-        assert.ok(error);
-        assert.ok(error.message.indexOf('notAField') !== -1, error.message);
-        assert.ok(error.message.indexOf('upsert') !== -1, error.message);
-        --outstanding || done();
-      });
+      error = await Model.updateMany(q, u, o).then(() => null, err => err);
+      assert.ok(error);
+      assert.ok(error.message.indexOf('notAField') !== -1, error.message);
+      assert.ok(error.message.indexOf('upsert') !== -1, error.message);
     });
 
     it('single embedded schema under document array (gh-4519)', function(done) {
@@ -3237,6 +3255,20 @@ describe('model: updateOne: ', function() {
       assert.strictEqual(doc.newProp, void 0);
     });
 
+    it('update pipeline - $unset with string (gh-11106)', async function() {
+      const schema = Schema({ oldProp: String, newProp: String });
+      const Model = db.model('Test', schema);
+
+      await Model.create({ oldProp: 'test' });
+      await Model.updateOne({}, [
+        { $set: { newProp: 'test2' } },
+        { $unset: 'oldProp' }
+      ]);
+      const doc = await Model.findOne();
+      assert.equal(doc.newProp, 'test2');
+      assert.strictEqual(doc.oldProp, void 0);
+    });
+
     it('update pipeline timestamps (gh-8524)', async function() {
       const Cat = db.model('Test', Schema({ name: String }, { timestamps: true }));
 
@@ -3256,10 +3288,10 @@ describe('model: updateOne: ', function() {
       const baseModel = db.model('Test', baseSchema);
 
       const aSchema = Schema({ aThing: Number }, { _id: false, id: false });
-      const aModel = baseModel.discriminator('A', aSchema);
+      const aModel = baseModel.discriminator('discriminator-A', aSchema, 'A');
 
       const bSchema = new Schema({ bThing: String }, { _id: false, id: false });
-      const bModel = baseModel.discriminator('B', bSchema);
+      const bModel = baseModel.discriminator('discriminator-B', bSchema, 'B');
 
       // Model is created as a type A
       let doc = await baseModel.create({ type: 'A', aThing: 1 });
@@ -3312,6 +3344,35 @@ describe('model: updateOne: ', function() {
 
     const fromDb = await Person.findById(doc);
     assert.equal(fromDb.children[0].name, 'Luke Skywalker');
+  });
+
+  it('works with doubly nested arrays with $pullAll (gh-13190)', async function() {
+    const multiArraySchema = new Schema({
+      _id: false,
+      label: String,
+      arr: [Number]
+    });
+
+    const baseTestSchema = new Schema({
+      baseLabel: String,
+      mArr: [[multiArraySchema]]
+    });
+
+    const Test = db.model('Test', baseTestSchema);
+
+    const arrB = new Test({
+      baseLabel: 'testx',
+      mArr: [[{ label: 'testInner', arr: [1, 2, 3, 4] }]]
+    });
+    await arrB.save();
+    const res = await Test.updateOne(
+      { baseLabel: 'testx' },
+      { $pullAll: { 'mArr.0.0.arr': [1, 2] } }
+    );
+    assert.equal(res.modifiedCount, 1);
+
+    const { mArr } = await Test.findById(arrB).lean().orFail();
+    assert.deepStrictEqual(mArr, [[{ label: 'testInner', arr: [3, 4] }]]);
   });
 
   describe('converts dot separated paths to nested structure (gh-10200)', () => {

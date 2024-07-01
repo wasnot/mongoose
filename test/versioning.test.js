@@ -7,7 +7,7 @@
 const start = require('./common');
 
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 
 const mongoose = start.mongoose;
 const Schema = mongoose.Schema;
@@ -77,13 +77,13 @@ describe('versioning', function() {
   it('versioning without version key', function(done) {
     const V = BlogPost;
 
-    const doc = new V;
+    const doc = new V();
     doc.numbers = [3, 4, 5, 6, 7];
     doc.comments = [
-      { title: 'does it work?', date: new Date },
+      { title: 'does it work?', date: new Date() },
       { title: '1', comments: [{ title: 'this is sub #1' }, { title: 'this is sub #2' }] },
       { title: '2', comments: [{ title: 'this is sub #3' }, { title: 'this is sub #4' }] },
-      { title: 'hi', date: new Date }
+      { title: 'hi', date: new Date() }
     ];
 
     function test(err) {
@@ -208,7 +208,7 @@ describe('versioning', function() {
     it('works without any other changes (gh-1475)', function(done) {
       const V = BlogPost;
 
-      const doc = new V;
+      const doc = new V();
       doc.save(function(err) {
         assert.ifError(err);
         assert.equal(doc.__v, 0);
@@ -540,7 +540,25 @@ describe('versioning', function() {
     assert.equal(thing_1.__v, 1);
     thing_2.set({ price: 1 });
     const err = await thing_2.save().then(() => null, err => err);
-    assert.equal(err.name, 'DocumentNotFoundError');
+    assert.equal(err.name, 'VersionError');
+  });
+
+  it('throws VersionError when saving with no changes and optimistic concurrency is true (gh-11295)', async function() {
+    const robotSchema = new mongoose.Schema({
+      name: String
+    }, { optimisticConcurrency: true });
+
+    const Robot = db.model('Robot', robotSchema);
+
+    const entry = await Robot.create({ name: 'WallE' });
+    const changes = await Robot.findOne({ _id: entry._id }).orFail().exec();
+    const other = await Robot.findOne({ _id: entry._id }).orFail().exec();
+    changes.name = 'John';
+    await changes.save();
+
+    other.name = 'WallE';
+    const err = await other.save().then(() => null, err => err);
+    assert.equal(err.name, 'VersionError');
   });
 
   it('gh-1898', function(done) {
@@ -650,5 +668,47 @@ describe('versioning', function() {
     const err = await d2.save().then(() => null, err => err);
     assert.ok(err);
     assert.equal(err.name, 'VersionError');
+  });
+
+  it('adds version to filter if pushing to a nested array (gh-11108)', async function() {
+    const Test = db.model('Test', Schema({ comments: [{ likedBy: [String] }] }));
+    const entry = await Test.create({
+      comments: [{ likedBy: ['Friends', 'Family'] }]
+    });
+
+    const post1 = await Test.findById(entry._id).exec();
+    const post2 = await Test.findById(entry._id).exec();
+
+    post1.comments = [{ likedBy: ['test'] }];
+    await post1.save();
+
+    let comment = post2.comments[0];
+    comment.likedBy.push('Some User');
+
+    const err = await post2.save().then(() => null, err => err);
+    assert.equal(err.name, 'VersionError');
+
+    const post3 = await Test.findById(entry._id).exec();
+    comment = post3.comments[0];
+    comment.likedBy.push('Some User');
+    await post3.save();
+    assert.equal(post3.__v, 2);
+  });
+
+  it('can store version key in nested property (gh-10980)', async function() {
+    const mongooseSchema = Schema({
+      name: String,
+      meta: {
+        test: String
+      }
+    }, { versionKey: 'meta.versionKey' });
+    const Model = db.model('Test', mongooseSchema);
+
+    const doc = new Model({ name: 'test' });
+    await doc.save();
+
+    assert.strictEqual(doc.meta.versionKey, 0);
+    const fromDb = await Model.findById(doc);
+    assert.strictEqual(fromDb.meta.versionKey, 0);
   });
 });

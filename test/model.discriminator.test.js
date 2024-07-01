@@ -8,7 +8,7 @@ const start = require('./common');
 
 const assert = require('assert');
 const clone = require('../lib/utils').clone;
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 const util = require('util');
 
 const mongoose = start.mongoose;
@@ -96,8 +96,6 @@ describe('model', function() {
       const employee = new Employee();
       assert.ok(employee instanceof Person);
       assert.ok(employee instanceof Employee);
-      assert.strictEqual(employee.__proto__.constructor, Employee);
-      assert.strictEqual(employee.__proto__.__proto__.constructor, Person);
     });
 
     it('can define static and instance methods', function() {
@@ -128,6 +126,34 @@ describe('model', function() {
       assert.equal(boss.notInstanceMethod, undefined);
       assert.equal(Boss.currentPresident(), 'obama');
       assert.equal(Boss.notStaticMethod, undefined);
+    });
+
+    it('can define virtuals and methods using schema options (gh-12246)', function() {
+      const baseSchema = new mongoose.Schema({
+        name: String
+      }, {
+        virtuals: {
+          virtualA: {
+            get: () => 'virtualA'
+          }
+        }
+      });
+
+      const discriminatorSchema = new mongoose.Schema({
+        prop: String
+      }, {
+        virtuals: {
+          virtualB: {
+            get: () => 'virtualB'
+          }
+        }
+      });
+      const BaseModel = db.model('Test', baseSchema);
+      const DiscriminatorModel = BaseModel.discriminator('Test1', discriminatorSchema);
+
+      const doc = new DiscriminatorModel();
+      assert.equal(doc.virtualA, 'virtualA');
+      assert.equal(doc.virtualB, 'virtualB');
     });
 
     it('sets schema root discriminator mapping', function(done) {
@@ -295,7 +321,7 @@ describe('model', function() {
         const employee = new Employee();
         assert.strictEqual(employee.getFullName, PersonSchema.methods.getFullName);
         assert.strictEqual(employee.getDepartment, EmployeeSchema.methods.getDepartment);
-        assert.equal((new Person).getDepartment, undefined);
+        assert.equal((new Person()).getDepartment, undefined);
       });
 
       it('inherits statics', function() {
@@ -312,7 +338,10 @@ describe('model', function() {
 
       it('does not inherit indexes', function() {
         assert.deepEqual(Person.schema.indexes(), [[{ name: 1 }, { background: true }]]);
-        assert.deepEqual(Employee.schema.indexes(), [[{ department: 1 }, { background: true }]]);
+        assert.deepEqual(
+          Employee.schema.indexes(),
+          [[{ department: 1 }, { background: true, partialFilterExpression: { __t: 'Employee' } }]]
+        );
       });
 
       it('gets options overridden by root options except toJSON and toObject', function() {
@@ -1866,5 +1895,279 @@ describe('model', function() {
     const res = await Parent.findById(p);
     assert.equal(res.c.gc.gc11, 'eleventy');
     assert.equal(res.c.gc.gc12, 110);
+  });
+
+  it('Should allow reusing discriminators (gh-10931)', async function() {
+    const options = { discriminatorKey: 'kind', overwriteModels: true };
+    const eventSchema = new mongoose.Schema({ time: Date }, options);
+    const Event = db.model('Event', eventSchema);
+
+    const ClickedLinkEvent = Event.discriminator('ClickedLink',
+      new mongoose.Schema({ url: String }, options));
+    const reUse = Event.discriminator('ClickedLink', new mongoose.Schema({ url: String }, options));
+    assert.ok(reUse);
+
+
+    const genericEvent = new Event({ time: Date.now(), url: 'google.com' });
+    assert.ok(!genericEvent.url);
+
+    const clickedEvent = new ClickedLinkEvent({ time: Date.now(), url: 'google.com' });
+    assert.ok(clickedEvent.url);
+
+    const reUseEvent = new reUse({ time: Date.now(), url: 'test.com' });
+    assert.ok(reUseEvent.url);
+  });
+
+  it('handles updating multiple properties nested underneath a discriminator (gh-11428)', async function() {
+    const StepSchema = new Schema({ url: String }, { discriminatorKey: 'type' });
+    const SheetReadOptionsSchema = new Schema({
+      location: {
+        id: String,
+        timeout: Number
+      }
+    });
+    const ClickSchema = new Schema(
+      [StepSchema, { sheetOptions: SheetReadOptionsSchema }],
+      { discriminatorKey: 'type' }
+    );
+
+    const Step = db.model('Step', StepSchema);
+
+    Step.discriminator('click', ClickSchema);
+
+    const doc = await Step.create({
+      type: 'click',
+      url: 'https://google.com',
+      sheetOptions: {
+        location: {
+          id: 'currentCell',
+          timeout: 1000
+        }
+      }
+    });
+
+    doc.set({
+      'sheetOptions.location.id': 'inColumn',
+      'sheetOptions.location.timeout': 2000
+    });
+    await doc.save();
+
+    const updatedDoc = await Step.findOne({ type: 'click', _id: doc._id });
+    assert.equal(updatedDoc.sheetOptions.location.id, 'inColumn');
+    assert.equal(updatedDoc.sheetOptions.location.timeout, 2000);
+  });
+
+  it('allows defining discriminator at the subSchema level in the subschema (gh-7971)', async function() {
+    const eventSchema = new Schema({ message: String },
+      { discriminatorKey: 'kind', _id: false });
+    const clickedSchema = new Schema({
+      element: {
+        type: String,
+        required: true
+      }
+    }, { _id: false });
+    const batchSchema = new Schema({ events: [eventSchema], mainEvent: { type: eventSchema, discriminators: { Clicked: clickedSchema } } });
+    const arraySchema = new Schema({ arrayEvent: [{ type: eventSchema, discriminators: { Clicked: clickedSchema } }] });
+    const Batch = db.model('Batch', batchSchema);
+    const Arrays = db.model('Array', arraySchema);
+
+    const batch = await Batch.create({
+      events: [{ message: 'Hello World' }],
+      mainEvent: { message: 'Goodbye', element: 'The Discriminator', kind: 'Clicked' }
+    });
+
+    assert(batch.mainEvent.element);
+
+    const array = await Arrays.create({
+      arrayEvent: [{ message: 'An array', element: 'with discriminators', kind: 'Clicked' }]
+    });
+
+    assert(array.arrayEvent[0].element);
+  });
+
+  it('handles discriminators on maps of subdocuments (gh-11720)', async function() {
+    const shapeSchema = Schema({ name: String }, { discriminatorKey: 'kind' });
+    const schema = Schema({ shape: { type: Map, of: shapeSchema } });
+
+    schema.path('shape.$*').discriminator('Circle', Schema({ radius: String }));
+    schema.path('shape.$*').discriminator('Square', Schema({ side: Number }));
+
+    const Test = db.model('Test', schema);
+
+    let doc = new Test({
+      shape: {
+        a: { kind: 'Circle', radius: 5 },
+        b: { kind: 'Square', side: 10 }
+      }
+    });
+
+    assert.strictEqual(doc.shape.get('a').radius, '5');
+    assert.strictEqual(doc.shape.get('b').side, 10);
+
+    await doc.save();
+
+    doc = await Test.findById(doc);
+
+    assert.strictEqual(doc.shape.get('a').radius, '5');
+    assert.strictEqual(doc.shape.get('b').side, 10);
+  });
+
+  it('supports `mergeHooks` option to use the discriminator schema\'s hooks over the base schema\'s (gh-12472)', function() {
+    const shapeSchema = Schema({ name: String }, { discriminatorKey: 'kind' });
+    shapeSchema.plugin(myPlugin);
+
+    const Shape = db.model('Test', shapeSchema);
+
+    const triangleSchema = Schema({ sides: { type: Number, enum: [3] } });
+    triangleSchema.plugin(myPlugin);
+    const Triangle = Shape.discriminator(
+      'Triangle',
+      triangleSchema
+    );
+    const squareSchema = Schema({ sides: { type: Number, enum: [4] } });
+    squareSchema.plugin(myPlugin);
+    const Square = Shape.discriminator(
+      'Square',
+      squareSchema,
+      { mergeHooks: false }
+    );
+
+    assert.equal(Triangle.schema.s.hooks._pres.get('save').filter(hook => hook.fn.name === 'testHook12472').length, 2);
+    assert.equal(Square.schema.s.hooks._pres.get('save').filter(hook => hook.fn.name === 'testHook12472').length, 1);
+
+    function myPlugin(schema) {
+      schema.pre('save', function testHook12472() {});
+    }
+  });
+
+  it('supports `mergePlugins` option to use the discriminator schema\'s plugins over the base schema\'s (gh-12604)', function() {
+    let pluginTimes = 0;
+    const shapeDef = { name: String };
+    const shapeSchema = Schema(shapeDef, { discriminatorKey: 'kind' });
+    shapeSchema.plugin(myPlugin, { opts1: true });
+
+    const Shape = db.model('Test', shapeSchema);
+
+    const triangleSchema = Schema({ ...shapeDef, sides: { type: Number, enum: [3] } });
+    triangleSchema.plugin(myPlugin, { opts2: true });
+    const Triangle = Shape.discriminator(
+      'Triangle',
+      triangleSchema
+    );
+
+    const squareSchema = Schema({ ...shapeDef, sides: { type: Number, enum: [4] } });
+    squareSchema.plugin(myPlugin, { opts3: true });
+    const Square = Shape.discriminator(
+      'Square',
+      squareSchema,
+      { mergeHooks: false, mergePlugins: false }
+    );
+
+    assert.equal(Triangle.schema.s.hooks._pres.get('save').filter(hook => hook.fn.name === 'testHook12604').length, 2);
+    assert.equal(Square.schema.s.hooks._pres.get('save').filter(hook => hook.fn.name === 'testHook12604').length, 1);
+
+    const squareFilteredPlugins = Square.schema.plugins.filter((obj) => obj.fn.name === 'myPlugin');
+    assert.equal(squareFilteredPlugins.length, 1);
+    assert.equal(squareFilteredPlugins[0].opts['opts3'], true);
+
+    assert.equal(pluginTimes, 3);
+
+    function myPlugin(schema) {
+      pluginTimes += 1;
+      schema.pre('save', function testHook12604() {});
+    }
+  });
+
+  it('applies built-in plugins if mergePlugins and mergeHooks disabled (gh-12696) (gh-12604)', async function() {
+    const shapeDef = { name: String };
+    const shapeSchema = Schema(shapeDef, { discriminatorKey: 'kind' });
+
+    const Shape = db.model('Test', shapeSchema);
+
+    let subdocSaveCalls = 0;
+    const nestedSchema = Schema({ test: String });
+    nestedSchema.pre('save', function() {
+      ++subdocSaveCalls;
+    });
+
+    const squareSchema = Schema({ ...shapeDef, nested: nestedSchema });
+    const Square = Shape.discriminator(
+      'Square',
+      squareSchema,
+      { mergeHooks: false, mergePlugins: false }
+    );
+
+    assert.equal(subdocSaveCalls, 0);
+    await Square.create({ nested: { test: 'foo' } });
+    assert.equal(subdocSaveCalls, 1);
+  });
+
+  it('uses "value" over "name" for multi-dimensonal arrays (gh-13201)', function() {
+    const buildingSchema = new mongoose.Schema(
+      {
+        width: {
+          type: Number,
+          default: 100
+        },
+        type: {
+          type: String,
+          enum: ['G', 'S']
+        }
+      },
+      { discriminatorKey: 'type', _id: false }
+    );
+
+    const garageSchema = buildingSchema.clone();
+    garageSchema.add({
+      slotsForCars: {
+        type: Number,
+        default: 10
+      }
+    });
+
+    const summerSchema = buildingSchema.clone();
+    summerSchema.add({
+      distanceToLake: {
+        type: Number,
+        default: 100
+      }
+    });
+
+    const areaSchema = new mongoose.Schema({
+      buildings: {
+        type: [
+          [
+            {
+              type: buildingSchema
+            }
+          ]
+        ]
+      }
+    });
+
+    garageSchema.paths['type'].options.$skipDiscriminatorCheck = true;
+    summerSchema.paths['type'].options.$skipDiscriminatorCheck = true;
+    const path = areaSchema.path('buildings');
+
+    path.discriminator('Garage', garageSchema, 'G');
+    path.discriminator('Summer', summerSchema, 'S');
+
+    const AreaModel = mongoose.model('Area', areaSchema);
+
+    const area = new AreaModel({
+      buildings: [
+        [
+          { type: 'S', distanceToLake: 100 },
+          { type: 'G', slotsForCars: 20 }
+        ]
+      ]
+    });
+
+    assert.ok(area.buildings[0][0].distanceToLake);
+    assert.ok(area.buildings[0][1].slotsForCars);
+
+    const innerBuildingsPath = AreaModel.schema.path('buildings.$');
+    assert.ok(innerBuildingsPath.schemaOptions.type.discriminators.Garage);
+    assert.equal(innerBuildingsPath.schemaOptions.type.discriminators.Garage.discriminatorMapping.value, 'G');
   });
 });

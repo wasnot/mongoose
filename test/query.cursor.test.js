@@ -27,13 +27,14 @@ describe('QueryCursor', function() {
   afterEach(() => require('./util').clearTestData(db));
   afterEach(() => require('./util').stopRemainingOps(db));
 
-  beforeEach(function() {
+  beforeEach(async function() {
     const schema = new Schema({ name: String });
     schema.virtual('test').get(function() { return 'test'; });
 
     Model = db.model('Test', schema);
 
-    return Model.create({ name: 'Axl' }, { name: 'Slash' });
+    await Model.deleteMany({});
+    await Model.create({ name: 'Axl' }, { name: 'Slash' });
   });
 
   describe('#next()', function() {
@@ -108,6 +109,8 @@ describe('QueryCursor', function() {
     });
 
     describe('with populate', function() {
+      let populateCalls = 0;
+
       const bandSchema = new Schema({
         name: String,
         members: [{ type: mongoose.Schema.ObjectId, ref: 'Person' }]
@@ -115,10 +118,11 @@ describe('QueryCursor', function() {
       const personSchema = new Schema({
         name: String
       });
+      personSchema.pre('find', () => { ++populateCalls; });
 
       let Band;
 
-      beforeEach(function(done) {
+      beforeEach(async function() {
         const Person = db.model('Person', personSchema);
         Band = db.model('Band', bandSchema);
 
@@ -131,96 +135,81 @@ describe('QueryCursor', function() {
           { name: 'Thom Yorke' },
           { name: 'Billy Corgan' }
         ];
-        Person.create(people, function(error, docs) {
-          assert.ifError(error);
-          const bands = [
-            { name: 'Guns N\' Roses', members: [docs[0], docs[1]] },
-            { name: 'Motley Crue', members: [docs[2], docs[3]] },
-            { name: 'Nine Inch Nails', members: [docs[4]] },
-            { name: 'Radiohead', members: [docs[5]] },
-            { name: 'The Smashing Pumpkins', members: [docs[6]] }
-          ];
-          Band.create(bands, function(error) {
-            assert.ifError(error);
-            done();
-          });
-        });
+        const docs = await Person.create(people);
+
+        const bands = [
+          { name: 'Guns N\' Roses', members: [docs[0], docs[1]] },
+          { name: 'Motley Crue', members: [docs[2], docs[3]] },
+          { name: 'Nine Inch Nails', members: [docs[4]] },
+          { name: 'Radiohead', members: [docs[5]] },
+          { name: 'The Smashing Pumpkins', members: [docs[6]] }
+        ];
+        await Band.create(bands);
       });
 
-      it('with populate without specify batchSize', function(done) {
-        const cursor =
-          Band.find().sort({ name: 1 }).populate('members').cursor();
-        cursor.next(function(error, doc) {
-          assert.ifError(error);
-          assert.equal(doc.name, 'Guns N\' Roses');
-          assert.equal(doc.members.length, 2);
-          assert.equal(doc.members[0].name, 'Axl Rose');
-          assert.equal(doc.members[1].name, 'Slash');
-          cursor.next(function(error, doc) {
-            assert.ifError(error);
-            assert.equal(doc.name, 'Motley Crue');
-            assert.equal(doc.members.length, 2);
-            assert.equal(doc.members[0].name, 'Nikki Sixx');
-            assert.equal(doc.members[1].name, 'Vince Neil');
-            cursor.next(function(error, doc) {
-              assert.ifError(error);
-              assert.equal(doc.name, 'Nine Inch Nails');
-              assert.equal(doc.members.length, 1);
-              assert.equal(doc.members[0].name, 'Trent Reznor');
-              cursor.next(function(error, doc) {
-                assert.ifError(error);
-                assert.equal(doc.name, 'Radiohead');
-                assert.equal(doc.members.length, 1);
-                assert.equal(doc.members[0].name, 'Thom Yorke');
-                cursor.next(function(error, doc) {
-                  assert.ifError(error);
-                  assert.equal(doc.name, 'The Smashing Pumpkins');
-                  assert.equal(doc.members.length, 1);
-                  assert.equal(doc.members[0].name, 'Billy Corgan');
-                  done();
-                });
-              });
-            });
-          });
-        });
+      it('with populate without specify batchSize', async function() {
+        const cursor = Band.find().sort({ name: 1 }).populate('members').cursor();
+
+        let doc = await cursor.next();
+        assert.equal(doc.name, 'Guns N\' Roses');
+        assert.equal(doc.members.length, 2);
+        assert.equal(doc.members[0].name, 'Axl Rose');
+        assert.equal(doc.members[1].name, 'Slash');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'Motley Crue');
+        assert.equal(doc.members.length, 2);
+        assert.equal(doc.members[0].name, 'Nikki Sixx');
+        assert.equal(doc.members[1].name, 'Vince Neil');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'Nine Inch Nails');
+        assert.equal(doc.members.length, 1);
+        assert.equal(doc.members[0].name, 'Trent Reznor');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'Radiohead');
+        assert.equal(doc.members.length, 1);
+        assert.equal(doc.members[0].name, 'Thom Yorke');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'The Smashing Pumpkins');
+        assert.equal(doc.members.length, 1);
+        assert.equal(doc.members[0].name, 'Billy Corgan');
       });
 
-      it('with populate using custom batchSize', function(done) {
+      it('with populate using custom batchSize', async function() {
+        populateCalls = 0;
         const cursor =
           Band.find().sort({ name: 1 }).populate('members').batchSize(3).cursor();
-        cursor.next(function(error, doc) {
-          assert.ifError(error);
-          assert.equal(doc.name, 'Guns N\' Roses');
-          assert.equal(doc.members.length, 2);
-          assert.equal(doc.members[0].name, 'Axl Rose');
-          assert.equal(doc.members[1].name, 'Slash');
-          cursor.next(function(error, doc) {
-            assert.ifError(error);
-            assert.equal(doc.name, 'Motley Crue');
-            assert.equal(doc.members.length, 2);
-            assert.equal(doc.members[0].name, 'Nikki Sixx');
-            assert.equal(doc.members[1].name, 'Vince Neil');
-            cursor.next(function(error, doc) {
-              assert.ifError(error);
-              assert.equal(doc.name, 'Nine Inch Nails');
-              assert.equal(doc.members.length, 1);
-              assert.equal(doc.members[0].name, 'Trent Reznor');
-              cursor.next(function(error, doc) {
-                assert.ifError(error);
-                assert.equal(doc.name, 'Radiohead');
-                assert.equal(doc.members.length, 1);
-                assert.equal(doc.members[0].name, 'Thom Yorke');
-                cursor.next(function(error, doc) {
-                  assert.ifError(error);
-                  assert.equal(doc.name, 'The Smashing Pumpkins');
-                  assert.equal(doc.members.length, 1);
-                  assert.equal(doc.members[0].name, 'Billy Corgan');
-                  done();
-                });
-              });
-            });
-          });
-        });
+
+        let doc = await cursor.next();
+        assert.equal(doc.name, 'Guns N\' Roses');
+        assert.equal(doc.members.length, 2);
+        assert.equal(doc.members[0].name, 'Axl Rose');
+        assert.equal(doc.members[1].name, 'Slash');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'Motley Crue');
+        assert.equal(doc.members.length, 2);
+        assert.equal(doc.members[0].name, 'Nikki Sixx');
+        assert.equal(doc.members[1].name, 'Vince Neil');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'Nine Inch Nails');
+        assert.equal(doc.members.length, 1);
+        assert.equal(doc.members[0].name, 'Trent Reznor');
+
+        doc = await cursor.next();
+        assert.equal(doc.members.length, 1);
+        assert.equal(doc.members[0].name, 'Thom Yorke');
+
+        doc = await cursor.next();
+        assert.equal(doc.name, 'The Smashing Pumpkins');
+        assert.equal(doc.members.length, 1);
+        assert.equal(doc.members[0].name, 'Billy Corgan');
+
+        assert.equal(populateCalls, 2);
       });
     });
 
@@ -817,8 +806,69 @@ describe('QueryCursor', function() {
     assert.ok(err);
     assert.equal(err.message, 'Oops!');
   });
-});
 
+  it('applies selected fields when using discriminators (gh-11130)', async function() {
+    const schemaOptions = { discriminatorKey: 'type' };
+    const schema = new Schema({
+      type: { type: String, enum: ['type1', 'type2'] },
+      foo: { type: String, default: 'foo' },
+      bar: { type: String }
+    }, schemaOptions);
+
+    const Example = db.model('Example', schema);
+
+    Example.discriminator('type1', Schema({ type1: String }, schemaOptions), 'type1');
+    Example.discriminator('type2', Schema({ type2: String }, schemaOptions), 'type2');
+
+    await Example.create({
+      type: 'type1',
+      foo: 'example1',
+      bar: 'example1',
+      type1: 'example1'
+    });
+    await Example.create({
+      type: 'type2',
+      foo: 'example2',
+      bar: 'example2',
+      type2: 'example2'
+    });
+
+    const cursor = Example.find().select('bar type');
+    const dirty = [];
+    for await (const doc of cursor) {
+      dirty.push(doc.$__dirty());
+      await doc.save();
+    }
+    assert.deepStrictEqual(dirty, [[], []]);
+
+    const docs = await Example.find().sort('foo');
+    assert.deepStrictEqual(docs.map(d => d.foo), ['example1', 'example2']);
+  });
+
+  it('should allow middleware to run before applying _optionsForExec() gh-13417', async function() {
+    const testSchema = new Schema({
+      a: Number,
+      b: Number,
+      c: Number
+    });
+    testSchema.pre('find', function() {
+      this.select('-c');
+    });
+    const Test = db.model('gh13417', testSchema);
+    await Test.create([{ a: 1, b: 1, c: 1 }, { a: 2, b: 2, c: 2 }]);
+    const cursorMiddleSelect = [];
+    let r;
+    const cursor = Test.find().select('-b').sort({ a: 1 }).cursor();
+    // eslint-disable-next-line no-cond-assign
+    while (r = await cursor.next()) {
+      cursorMiddleSelect.push(r);
+    }
+    assert.equal(typeof cursorMiddleSelect[0].b, 'undefined');
+    assert.equal(typeof cursorMiddleSelect[1].b, 'undefined');
+    assert.equal(typeof cursorMiddleSelect[0].c, 'undefined');
+    assert.equal(typeof cursorMiddleSelect[1].c, 'undefined');
+  });
+});
 
 async function delay(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));

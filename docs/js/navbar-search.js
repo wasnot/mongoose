@@ -1,11 +1,19 @@
-document.getElementById('search-button-nav').onclick = function() {
-  var q = document.getElementById('search-input-nav').value;
-  window.location.href = 'search.html?q=' + encodeURIComponent(q);
-};
+'use strict';
+(function() {
+  const versionFromUrl = window.location.pathname.match(/^\/docs\/(\d+\.x)/);
+  const version = versionFromUrl ? versionFromUrl[1] : null;
 
-var q = document.getElementById('search-input-nav').onkeyup = function(ev) {
-  if (ev.keyCode === 13) {
-    var q = document.getElementById('search-input-nav').value;
-    window.location.href = '/docs/search.html?q=' + encodeURIComponent(q);
-  }
-};
+  const searchPrefix = versionFromUrl ? '/docs/' + version + '/docs/' : '/docs/';
+
+  document.getElementById('search-button-nav').onclick = function() {
+    const q = document.getElementById('search-input-nav').value;
+    window.location.href = searchPrefix + 'search.html?q=' + encodeURIComponent(q);
+  };
+
+  document.getElementById('search-input-nav').onkeyup = function(ev) {
+    if (ev.keyCode === 13) {
+      const q = document.getElementById('search-input-nav').value;
+      window.location.href = searchPrefix + 'search.html?q=' + encodeURIComponent(q);
+    }
+  };
+})();

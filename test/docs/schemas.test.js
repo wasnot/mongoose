@@ -2,13 +2,14 @@
 
 const assert = require('assert');
 const mongoose = require('../../');
+const start = require('../common');
 
 describe('Advanced Schemas', function() {
   let db;
   const Schema = mongoose.Schema;
 
   before(function() {
-    db = mongoose.createConnection('mongodb://localhost:27017/mongoose_test');
+    db = mongoose.createConnection(start.uri);
   });
 
   after(async function() {
@@ -40,7 +41,7 @@ describe('Advanced Schemas', function() {
       set fullName(v) {
         const firstSpace = v.indexOf(' ');
         this.firstName = v.split(' ')[0];
-        this.lastName = firstSpace === -1 ? '' : v.substr(firstSpace + 1);
+        this.lastName = firstSpace === -1 ? '' : v.substring(firstSpace + 1);
       }
 
       // `getFullName()` becomes a document method
@@ -52,14 +53,14 @@ describe('Advanced Schemas', function() {
       static findByFullName(name) {
         const firstSpace = name.indexOf(' ');
         const firstName = name.split(' ')[0];
-        const lastName = firstSpace === -1 ? '' : name.substr(firstSpace + 1);
+        const lastName = firstSpace === -1 ? '' : name.substring(firstSpace + 1);
         return this.findOne({ firstName, lastName });
       }
     }
 
     schema.loadClass(PersonClass);
     const Person = db.model('Person', schema);
-    
+
     const doc = await Person.create({
       firstName: 'Jon',
       lastName: 'Snow'
@@ -70,7 +71,7 @@ describe('Advanced Schemas', function() {
     assert.equal(doc.firstName, 'Jon');
     assert.equal(doc.lastName, 'Stark');
     const foundPerson = await Person.findByFullName('Jon Snow');
-    
+
     assert.equal(foundPerson.fullName, 'My name is Jon Snow');
   });
 });

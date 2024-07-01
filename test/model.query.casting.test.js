@@ -7,7 +7,7 @@
 const start = require('./common');
 
 const assert = require('assert');
-const random = require('../lib/utils').random;
+const random = require('./util').random;
 
 const mongoose = start.mongoose;
 
@@ -36,7 +36,7 @@ describe('model query casting', function() {
   afterEach(() => require('./util').stopRemainingOps(db));
 
   beforeEach(function() {
-    Comments = new Schema;
+    Comments = new Schema();
 
     Comments.add({
       title: String,
@@ -179,7 +179,7 @@ describe('model query casting', function() {
   it('works when finding by Date (gh-204)', function(done) {
     const P = BlogPostB;
 
-    const post = new P;
+    const post = new P();
 
     post.meta.date = new Date();
 

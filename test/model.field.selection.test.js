@@ -31,7 +31,7 @@ describe('model field selection', function() {
   afterEach(() => require('./util').stopRemainingOps(db));
 
   beforeEach(function() {
-    Comments = new Schema;
+    Comments = new Schema();
 
     Comments.add({
       title: String,
@@ -64,12 +64,12 @@ describe('model field selection', function() {
   });
 
   it('excluded fields should be undefined', function(done) {
-    const date = new Date;
+    const date = new Date();
 
     const doc = {
       title: 'subset 1',
       author: 'me',
-      comments: [{ title: 'first comment', date: new Date }, { title: '2nd', date: new Date }],
+      comments: [{ title: 'first comment', date: new Date() }, { title: '2nd', date: new Date() }],
       meta: { date: date }
     };
 
@@ -98,8 +98,8 @@ describe('model field selection', function() {
   });
 
   it('excluded fields should be undefined and defaults applied to other fields', function(done) {
-    const id = new DocumentObjectId;
-    const date = new Date;
+    const id = new DocumentObjectId();
+    const date = new Date();
 
     BlogPostB.collection.insertOne({ _id: id, title: 'hahaha1', meta: { date: date } }, function(err) {
       assert.ifError(err);
@@ -180,7 +180,7 @@ describe('model field selection', function() {
   });
 
   it('included fields should have defaults applied when no value exists in db (gh-870)', function(done) {
-    const id = new DocumentObjectId;
+    const id = new DocumentObjectId();
 
     BlogPostB.collection.insertOne(
       { _id: id, title: 'issue 870' }, function(err) {
@@ -258,8 +258,8 @@ describe('model field selection', function() {
       });
 
       const B = db.model('Test', postSchema);
-      const _id1 = new mongoose.Types.ObjectId;
-      const _id2 = new mongoose.Types.ObjectId;
+      const _id1 = new mongoose.Types.ObjectId();
+      const _id2 = new mongoose.Types.ObjectId();
 
       B.create({ ids: [_id1, _id2] }, function(err, doc) {
         assert.ifError(err);
@@ -297,8 +297,8 @@ describe('model field selection', function() {
       });
 
       const B = db.model('Test', postSchema);
-      const _id1 = new mongoose.Types.ObjectId;
-      const _id2 = new mongoose.Types.ObjectId;
+      const _id1 = new mongoose.Types.ObjectId();
+      const _id2 = new mongoose.Types.ObjectId();
 
       B.create({ ids: [_id1, _id2], ids2: [_id2, _id1] }, function(err, doc) {
         assert.ifError(err);
@@ -475,7 +475,6 @@ describe('model field selection', function() {
     db.deleteModel(/BlogPost/);
     const BlogPost = db.model('BlogPost', BlogPostSchema);
 
-
     await BlogPost.create({
       author: 'me',
       settings: {
@@ -497,8 +496,6 @@ describe('model field selection', function() {
   });
 
   it('when `select: true` in schema, works with $elemMatch in projection', async function() {
-
-
     const productSchema = new Schema({
       attributes: {
         select: true,
@@ -524,11 +521,9 @@ describe('model field selection', function() {
   });
 
   it('selection specified in query overwrites option in schema', async function() {
-
     const productSchema = new Schema({ name: { type: String, select: false } });
 
     const Product = db.model('Product', productSchema);
-
 
     await Product.create({ name: 'Computer' });
 
@@ -538,7 +533,6 @@ describe('model field selection', function() {
   });
 
   it('selecting with `false` instead of `0` doesn\'t overwrite schema `select: false` (gh-8923)', async function() {
-
     const userSchema = new Schema({
       name: { type: String, select: false },
       age: { type: Number }
@@ -551,5 +545,22 @@ describe('model field selection', function() {
     const user = await User.findOne().select({ age: false });
 
     assert.ok(!user.name);
+  });
+
+  it('handles deselecting _id when other field has schema-level `select: false` (gh-12670)', async function() {
+    const schema = new mongoose.Schema({
+      field1: {
+        type: String,
+        select: false
+      },
+      field2: String
+    });
+    const User = db.model('User', schema);
+
+    await User.create({ field1: 'test1', field2: 'test2' });
+    const doc = await User.findOne().select('field2 -_id');
+    assert.ok(doc.field2);
+    assert.strictEqual(doc.field1, undefined);
+    assert.strictEqual(doc._id, undefined);
   });
 });
